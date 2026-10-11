@@ -22,16 +22,22 @@ class ScreeningCreateRequest(BaseModel):
     @classmethod
     def normalize_application(cls, value: str) -> str:
         value = value.strip()
+
         if not value:
             raise ValueError("application_text must not be blank")
+
         return value
 
     @field_validator("required_skills")
     @classmethod
     def normalize_skills(cls, values: list[str]) -> list[str]:
         deduped = list(dict.fromkeys(v.strip() for v in values if v.strip()))
+
         if not deduped:
-            raise ValueError("required_skills must contain at least one non-blank skill")
+            raise ValueError(
+                "required_skills must contain at least one non-blank skill"
+            )
+
         return deduped
 
 

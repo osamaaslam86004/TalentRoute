@@ -26,7 +26,9 @@ class Recommendation(StrEnum):
 class ExperienceAssessment(BaseModel):
     model_config = ConfigDict(extra="forbid")
     level: ExperienceLevel
-    confidence: float = Field(ge=0.0, le=1.0, description="Model estimate, not a calibrated probability.")
+    confidence: float = Field(
+        ge=0.0, le=1.0, description="Model estimate, not a calibrated probability."
+    )
     evidence: list[str] = Field(default_factory=list, max_length=8)
     rationale: str = Field(max_length=1200)
 
@@ -39,7 +41,9 @@ class ExperienceAssessment(BaseModel):
 class SkillsAssessment(BaseModel):
     model_config = ConfigDict(extra="forbid")
     match: SkillMatch
-    confidence: float = Field(ge=0.0, le=1.0, description="Model estimate, not a calibrated probability.")
+    confidence: float = Field(
+        ge=0.0, le=1.0, description="Model estimate, not a calibrated probability."
+    )
     evidence: list[str] = Field(default_factory=list, max_length=12)
     gaps: list[str] = Field(default_factory=list, max_length=20)
     rationale: str = Field(max_length=1600)

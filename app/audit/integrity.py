@@ -11,8 +11,10 @@ GENESIS_HASH = "0" * 64
 
 
 def _timestamp(value: datetime) -> str:
+
     if value.tzinfo is None:
         raise ValueError("Audit timestamps must be timezone-aware")
+
     return value.astimezone(timezone.utc).isoformat(timespec="microseconds")
 
 
@@ -32,6 +34,7 @@ def audit_hash_payload(
     sequence_no: int,
     previous_hash: str,
 ) -> dict[str, Any]:
+
     return {
         "id": event_id,
         "occurred_at": _timestamp(occurred_at),
@@ -50,6 +53,7 @@ def audit_hash_payload(
 
 
 def calculate_event_hash(payload: dict[str, Any]) -> str:
+
     canonical = json.dumps(
         payload,
         ensure_ascii=False,
@@ -57,4 +61,5 @@ def calculate_event_hash(payload: dict[str, Any]) -> str:
         separators=(",", ":"),
         allow_nan=False,
     ).encode("utf-8")
+
     return hashlib.sha256(canonical).hexdigest()

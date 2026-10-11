@@ -40,6 +40,13 @@ class Settings(BaseSettings):
 
     max_application_chars: int = Field(default=30000, ge=100, le=100000)
     task_max_retries: int = Field(default=2, ge=0, le=5)
+    screening_rate_limit_requests: int = Field(default=30, ge=1, le=10000)
+    screening_rate_limit_window_seconds: int = Field(default=60, ge=1, le=86400)
+    rate_limit_fail_open: bool = False
+    outbox_batch_size: int = Field(default=50, ge=1, le=500)
+    outbox_max_attempts: int = Field(default=12, ge=1, le=100)
+    outbox_lease_seconds: int = Field(default=120, ge=10, le=3600)
+    stale_processing_seconds: int = Field(default=900, ge=60, le=86400)
     pii_redaction_enabled: bool = True
     pii_redaction_policy: Literal["baseline", "strict"] = "baseline"
     screening_rubric_version: str = "screening-rubric-v1"

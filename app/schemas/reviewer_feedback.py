@@ -42,12 +42,18 @@ class ReviewerFeedbackCreate(BaseModel):
     @field_validator("reason_codes")
     @classmethod
     def validate_reason_codes(cls, values: list[str]) -> list[str]:
+
         unique = list(dict.fromkeys(value.strip() for value in values if value.strip()))
         unknown = set(unique).difference(ALLOWED_REASON_CODES)
+
         if unknown:
-            raise ValueError(f"Unsupported reason code(s): {', '.join(sorted(unknown))}")
+            raise ValueError(
+                f"Unsupported reason code(s): {', '.join(sorted(unknown))}"
+            )
+
         if not unique:
             raise ValueError("At least one reason code is required")
+
         return unique
 
 

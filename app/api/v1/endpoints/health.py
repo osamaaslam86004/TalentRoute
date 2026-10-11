@@ -16,11 +16,15 @@ async def liveness() -> dict[str, str]:
 @router.get("/health/ready")
 async def readiness() -> dict[str, str]:
     settings = get_settings()
+
     async with engine.connect() as connection:
         await connection.execute(text("SELECT 1"))
+
     client = from_url(settings.redis_url, socket_connect_timeout=2, socket_timeout=2)
+
     try:
         await client.ping()
     finally:
         await client.aclose()
+
     return {"status": "ready", "database": "ok", "redis": "ok"}

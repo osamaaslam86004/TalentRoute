@@ -10,9 +10,13 @@ from app.core.config import get_settings
 from app.core.security import Principal, require_permission
 from app.db.models.reviewer_feedback import ReviewerFeedback
 from app.db.session import get_db_session
-from app.future_features.audit_events import record_audit_event
+from app.audit.service import record_audit_event
 from app.repositories.screenings import get_screening
-from app.future_features.reviewer_feedback import append_appeal_outcome, append_feedback, get_feedback_by_id
+from app.reviews.service import (
+    append_appeal_outcome,
+    append_feedback,
+    get_feedback_by_id,
+)
 from app.schemas.reviewer_feedback import (
     AppealCreate,
     ReviewerFeedbackCreate,
@@ -34,7 +38,11 @@ async def submit_feedback(
     principal: Principal = Depends(require_permission("review:write")),
     session: AsyncSession = Depends(get_db_session),
 ) -> ReviewerFeedbackRead:
-    screening = await get_screening(session, screening_id, tenant_id=principal.tenant_id)
+
+    screening = await get_screening(
+        session, screening_id, tenant_id=principal.tenant_id
+    )
+
     if screening is None:
         raise HTTPException(status_code=404, detail="Screening not found")
 
@@ -46,6 +54,7 @@ async def submit_feedback(
         payload=payload,
         rubric_version=get_settings().screening_rubric_version,
     )
+
     await record_audit_event(
         session,
         principal=principal,
@@ -54,10 +63,16 @@ async def submit_feedback(
         action="review.feedback_submitted",
         resource_type="reviewer_feedback",
         resource_id=str(item.id),
-        metadata={"label": payload.label.value, "reason_codes": payload.reason_codes, "rubric_version": item.rubric_version},
+        metadata={
+            "label": payload.label.value,
+            "reason_codes": payload.reason_codes,
+            "rubric_version": item.rubric_version,
+        },
     )
+
     await session.commit()
     await session.refresh(item)
+
     return ReviewerFeedbackRead.model_validate(item)
 
 
@@ -73,19 +88,28 @@ async def list_feedback(
     principal: Principal = Depends(require_permission("review:read")),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[ReviewerFeedbackRead]:
-    screening = await get_screening(session, screening_id, tenant_id=principal.tenant_id)
+    screening = await get_screening(
+        session, screening_id, tenant_id=principal.tenant_id
+    )
+
     if screening is None:
         raise HTTPException(status_code=404, detail="Screening not found")
-    items = list((await session.scalars(
-        select(ReviewerFeedback)
-        .where(
-            ReviewerFeedback.tenant_id == principal.tenant_id,
-            ReviewerFeedback.screening_id == screening_id,
-        )
-        .order_by(ReviewerFeedback.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )).all())
+
+    items = list(
+        (
+            await session.scalars(
+                select(ReviewerFeedback)
+                .where(
+                    ReviewerFeedback.tenant_id == principal.tenant_id,
+                    ReviewerFeedback.screening_id == screening_id,
+                )
+                .order_by(ReviewerFeedback.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+        ).all()
+    )
+
     await record_audit_event(
         session,
         principal=principal,
@@ -96,7 +120,9 @@ async def list_feedback(
         resource_id=str(screening_id),
         metadata={"count": len(items), "limit": limit, "offset": offset},
     )
+
     await session.commit()
+
     return [ReviewerFeedbackRead.model_validate(item) for item in items]
 
 
@@ -112,16 +138,26 @@ async def record_appeal_outcome(
     principal: Principal = Depends(require_permission("review:appeal")),
     session: AsyncSession = Depends(get_db_session),
 ) -> ReviewerFeedbackRead:
+
     original = await get_feedback_by_id(
-        session, feedback_id=feedback_id, tenant_id=principal.tenant_id, record_type="review"
+        session,
+        feedback_id=feedback_id,
+        tenant_id=principal.tenant_id,
+        record_type="review",
     )
+
     if original is None:
         raise HTTPException(status_code=404, detail="Reviewer feedback not found")
 
     # Appeal outcomes are new events. The original reviewer feedback is never overwritten.
     item = await append_appeal_outcome(
-        session, original=original, tenant_id=principal.tenant_id, principal=principal, payload=payload
+        session,
+        original=original,
+        tenant_id=principal.tenant_id,
+        principal=principal,
+        payload=payload,
     )
+
     await record_audit_event(
         session,
         principal=principal,
@@ -132,6 +168,8 @@ async def record_appeal_outcome(
         resource_id=str(item.id),
         metadata={"appeal_outcome": payload.outcome.value, "record_type": "appeal"},
     )
+
     await session.commit()
     await session.refresh(item)
+
     return ReviewerFeedbackRead.model_validate(item)

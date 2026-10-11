@@ -26,10 +26,17 @@ class RedactionResult:
 
 # Order matters: remove values in labelled fields, then unlabelled structured identifiers.
 _RULES: tuple[tuple[str, re.Pattern[str], str, bool], ...] = (
-    ("email", re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I), "[REDACTED_EMAIL]", False),
+    (
+        "email",
+        re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I),
+        "[REDACTED_EMAIL]",
+        False,
+    ),
     (
         "labelled_name",
-        re.compile(r"(?im)(\b(?:candidate|applicant|full\s+name|name)\s*:\s*)([^\n,;]{2,80})"),
+        re.compile(
+            r"(?im)(\b(?:candidate|applicant|full\s+name|name)\s*:\s*)([^\n,;]{2,80})"
+        ),
         r"\1[REDACTED_NAME]",
         False,
     ),
@@ -41,13 +48,17 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, bool], ...] = (
     ),
     (
         "phone",
-        re.compile(r"(?<!\w)(?:\+?\d{1,3}[ .()/-]?)?(?:\(?\d{2,4}\)?[ .()/-]?)?\d{3,4}[ .()/-]\d{3,4}(?!\w)"),
+        re.compile(
+            r"(?<!\w)(?:\+?\d{1,3}[ .()/-]?)?(?:\(?\d{2,4}\)?[ .()/-]?)?\d{3,4}[ .()/-]\d{3,4}(?!\w)"
+        ),
         "[REDACTED_PHONE]",
         False,
     ),
     (
         "government_id",
-        re.compile(r"(?i)\b(?:ssn|national\s+id|passport|government\s+id|employee\s+id|tax\s+id)\s*(?:number|no\.?|#)?\s*[:#-]?\s*[A-Z0-9-]{5,}\b"),
+        re.compile(
+            r"(?i)\b(?:ssn|national\s+id|passport|government\s+id|employee\s+id|tax\s+id)\s*(?:number|no\.?|#)?\s*[:#-]?\s*[A-Z0-9-]{5,}\b"
+        ),
         "[REDACTED_ID]",
         False,
     ),
@@ -59,26 +70,37 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, bool], ...] = (
     ),
     (
         "street_address",
-        re.compile(r"\b\d{1,6}\s+(?:[A-Z0-9.'-]+\s+){1,5}(?:Street|St\.?|Road|Rd\.?|Avenue|Ave\.?|Boulevard|Blvd\.?|Lane|Ln\.?|Drive|Dr\.?|Way)\b(?:,?\s*[^\n,]{0,60})?", re.I),
+        re.compile(
+            r"\b\d{1,6}\s+(?:[A-Z0-9.'-]+\s+){1,5}(?:Street|St\.?|Road|Rd\.?|Avenue|Ave\.?|Boulevard|Blvd\.?|Lane|Ln\.?|Drive|Dr\.?|Way)\b(?:,?\s*[^\n,]{0,60})?",
+            re.I,
+        ),
         "[REDACTED_ADDRESS]",
         True,
     ),
 )
 
 
-def redact_pii(text: str, *, enabled: bool = True, policy: str = "baseline") -> RedactionResult:
+def redact_pii(
+    text: str, *, enabled: bool = True, policy: str = "baseline"
+) -> RedactionResult:
     """Mask structured PII and expose aggregate counts only, never the matched values."""
+
     if not enabled:
         return RedactionResult(text=text, counts={}, changed=False)
+
     if policy not in {"baseline", "strict"}:
         raise ValueError("policy must be 'baseline' or 'strict'")
 
     output = text
     counts: dict[str, int] = {}
+
     for category, pattern, replacement, strict_only in _RULES:
+
         if strict_only and policy != "strict":
             continue
+
         output, count = pattern.subn(replacement, output)
         if count:
             counts[category] = count
+
     return RedactionResult(text=output, counts=counts, changed=output != text)

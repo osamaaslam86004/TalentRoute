@@ -13,17 +13,34 @@ import uuid
 from typing import Any
 
 _PRIVATE_FIELDS = {
-    "model_version", "prompt_version", "provider", "provider_name", "case_id", "latency_ms",
-    "estimated_cost_usd", "judge_assessment", "schema_valid", "schema_validity",
+    "model_version",
+    "prompt_version",
+    "provider",
+    "provider_name",
+    "case_id",
+    "latency_ms",
+    "estimated_cost_usd",
+    "judge_assessment",
+    "schema_valid",
+    "schema_validity",
 }
 
 
 def _public_response(row: dict[str, Any]) -> dict[str, Any]:
+
     payload = row.get("prediction") if isinstance(row.get("prediction"), dict) else row
+
     allowed = {
-        "experience_level", "skills_match", "recommendation", "experience_evidence",
-        "skills_evidence", "skill_gaps", "experience_confidence", "skills_confidence",
+        "experience_level",
+        "skills_match",
+        "recommendation",
+        "experience_evidence",
+        "skills_evidence",
+        "skill_gaps",
+        "experience_confidence",
+        "skills_confidence",
     }
+
     return {key: value for key, value in payload.items() if key in allowed}
 
 
@@ -37,17 +54,32 @@ def create_blinded_pairs(
     include_review_context: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return public review tasks and a private key mapping; input candidates must share case IDs."""
-    a_by_id = {row.get("case_id"): row for row in candidate_a if isinstance(row.get("case_id"), str)}
-    b_by_id = {row.get("case_id"): row for row in candidate_b if isinstance(row.get("case_id"), str)}
+
+    a_by_id = {
+        row.get("case_id"): row
+        for row in candidate_a
+        if isinstance(row.get("case_id"), str)
+    }
+    b_by_id = {
+        row.get("case_id"): row
+        for row in candidate_b
+        if isinstance(row.get("case_id"), str)
+    }
+
     if len(a_by_id) != len(candidate_a) or len(b_by_id) != len(candidate_b):
-        raise ValueError("Each pairwise prediction row must have a unique string case_id")
+        raise ValueError(
+            "Each pairwise prediction row must have a unique string case_id"
+        )
+
     common_ids = sorted(set(a_by_id).intersection(b_by_id))
+
     if not common_ids:
         raise ValueError("Candidate files do not contain a shared case_id")
 
     rng = random.Random(seed)
     public: list[dict[str, Any]] = []
     private: list[dict[str, Any]] = []
+
     for case_id in common_ids:
         swap = bool(rng.getrandbits(1))
         model_a = candidate_b_version if swap else candidate_a_version
@@ -64,20 +96,26 @@ def create_blinded_pairs(
             "candidate_b": output_b,
             "judgment": {"winner": None, "reason_code": None},
         }
+
         if include_review_context:
             context_a = row_a.get("review_context")
             context_b = row_b.get("review_context")
+
             if context_a and context_b and context_a != context_b:
                 raise ValueError(f"Review context mismatch for case_id={case_id}")
             task["review_context"] = context_a or context_b or ""
+
         public.append(task)
-        private.append({
-            "pair_id": pair_id,
-            "case_id": case_id,
-            "candidate_a_version": model_a,
-            "candidate_b_version": model_b,
-            "swap_applied": swap,
-        })
+        private.append(
+            {
+                "pair_id": pair_id,
+                "case_id": case_id,
+                "candidate_a_version": model_a,
+                "candidate_b_version": model_b,
+                "swap_applied": swap,
+            }
+        )
+
     return public, private
 
 
@@ -85,27 +123,34 @@ def score_blinded_judgments(
     public_tasks: list[dict[str, Any]], private_mapping: list[dict[str, Any]]
 ) -> dict[str, Any]:
     """Unblind a completed review and report aggregate preferences; never infer winner from model output."""
+
     mappings = {item["pair_id"]: item for item in private_mapping}
     model_wins: dict[str, int] = {}
     pair_results = 0
     ties = 0
     missing = []
+
     for task in public_tasks:
         pair_id = task.get("pair_id")
         mapping = mappings.get(pair_id)
         judgment = task.get("judgment") or {}
         winner = judgment.get("winner")
+
         if mapping is None:
             missing.append(pair_id)
             continue
+
         if winner not in {"a", "b", "tie", "both_bad"}:
             continue
+
         pair_results += 1
         if winner in {"tie", "both_bad"}:
             ties += 1
             continue
+
         version = mapping[f"candidate_{winner}_version"]
         model_wins[version] = model_wins.get(version, 0) + 1
+
     return {
         "report_version": "blinded-pairwise-summary-v1",
         "completed_pairs": pair_results,

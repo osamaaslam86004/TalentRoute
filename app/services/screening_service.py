@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
-from app.future_features.audit_events import record_audit_event
-from app.future_features.pii_redaction import redact_pii
+from app.audit.service import record_audit_event
+from app.privacy.pii_redaction import redact_pii
 from app.repositories.screenings import get_screening
 from app.schemas.assessment import ExperienceAssessment, SkillsAssessment
 from app.workflows.screening.graph import create_screening_graph
@@ -14,17 +14,54 @@ from app.workflows.screening.prompts import PROMPT_VERSION
 logger = logging.getLogger(__name__)
 
 
-async def process_screening(screening_id: uuid.UUID) -> None:
+async def process_screening(
+    screening_id: uuid.UUID, *, allow_reclaim_running: bool = False
+) -> None:
     """Run the graph over minimized text and persist provenance plus a privacy-safe audit event."""
+
     settings = get_settings()
+
     async with AsyncSessionLocal() as session:
         screening = await get_screening(session, screening_id, for_update=True)
+
         if screening is None:
-            logger.warning("screening task references missing record id=%s", screening_id)
+            logger.warning(
+                "screening task references missing record id=%s", screening_id
+            )
             return
+
         if screening.status == "completed":
             return  # Idempotent for task redelivery after a successful commit.
+
+        now = datetime.now(timezone.utc)
+
+        if (
+            screening.status == "running"
+            and screening.processing_started_at is not None
+        ):
+            age_seconds = (now - screening.processing_started_at).total_seconds()
+
+            if (
+                not allow_reclaim_running
+                and age_seconds < settings.stale_processing_seconds
+            ):
+                logger.info("duplicate screening task ignored id=%s", screening_id)
+                return
+
+            if allow_reclaim_running:
+                logger.warning(
+                    "reclaiming redelivered running task id=%s", screening_id
+                )
+
+            else:
+                logger.warning(
+                    "reclaiming stale screening task id=%s age_seconds=%s",
+                    screening_id,
+                    int(age_seconds),
+                )
+
         screening.status = "running"
+        screening.processing_started_at = now
         screening.error_code = None
         screening.attempt_count += 1
         screening.model_version = settings.openai_model
@@ -36,33 +73,49 @@ async def process_screening(screening_id: uuid.UUID) -> None:
 
     redaction_counts: dict[str, int] = {}
     redacted_categories: list[str] = []
+
     try:
         redaction = redact_pii(
             raw_application_text,
             enabled=settings.pii_redaction_enabled,
             policy=settings.pii_redaction_policy,
         )
+
         redaction_counts = redaction.counts
         redacted_categories = redaction.categories
+
         graph = create_screening_graph()
-        result = await graph.ainvoke({
-            "screening_id": str(screening_id),
-            "application_text": redaction.text[: settings.max_application_chars],
-            "job_title": job_title,
-            "required_skills": required_skills,
-        })
+
+        result = await graph.ainvoke(
+            {
+                "screening_id": str(screening_id),
+                "application_text": redaction.text[: settings.max_application_chars],
+                "job_title": job_title,
+                "required_skills": required_skills,
+            }
+        )
+
         experience: ExperienceAssessment = result["experience_assessment"]
         skills: SkillsAssessment = result["skills_assessment"]
+
     except Exception as exc:
         # Store a stable error code only; provider exceptions can contain request details or sensitive text.
-        logger.error("screening processing failed id=%s error_type=%s", screening_id, type(exc).__name__)
+        logger.error(
+            "screening processing failed id=%s error_type=%s",
+            screening_id,
+            type(exc).__name__,
+        )
+
         async with AsyncSessionLocal() as session:
             row = await get_screening(session, screening_id, for_update=True)
+
             if row is not None:
                 row.status = "failed"
+                row.processing_started_at = None
                 row.error_code = "screening_processing_failed"
                 row.redaction_summary = redaction_counts
                 row.processed_at = datetime.now(timezone.utc)
+
                 await record_audit_event(
                     session,
                     principal=None,
@@ -84,9 +137,12 @@ async def process_screening(screening_id: uuid.UUID) -> None:
 
     async with AsyncSessionLocal() as session:
         row = await get_screening(session, screening_id, for_update=True)
+
         if row is None:
             return
+
         row.status = "completed"
+        row.processing_started_at = None
         row.experience_level = experience.level.value
         row.experience_confidence = experience.confidence
         row.experience_evidence = experience.evidence
@@ -102,6 +158,7 @@ async def process_screening(screening_id: uuid.UUID) -> None:
         row.redaction_summary = redaction.counts
         row.error_code = None
         row.processed_at = datetime.now(timezone.utc)
+
         await record_audit_event(
             session,
             principal=None,

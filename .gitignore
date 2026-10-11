@@ -18,6 +18,4 @@ htmlcov/
 reports/*.json
 *.predictions.jsonl
 
-completed_features/
-future_features/
 datasets/

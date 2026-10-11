@@ -13,23 +13,41 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select, text
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import Principal
 from app.db.models.audit_chain_head import AuditChainHead
 from app.db.models.audit_event import AuditEvent
-from app.future_features.audit_integrity import GENESIS_HASH, audit_hash_payload, calculate_event_hash
+from app.audit.integrity import GENESIS_HASH, audit_hash_payload, calculate_event_hash
 
 _ALLOWED_METADATA = {
-    "status", "count", "limit", "offset", "prompt_version", "model_version", "rubric_version",
-    "label", "reason_codes", "redacted_categories", "latency_ms", "cost_usd", "dataset_version",
-    "report_id", "appeal_outcome", "attempt_count", "record_type", "schema_valid",
+    "status",
+    "count",
+    "limit",
+    "offset",
+    "prompt_version",
+    "model_version",
+    "rubric_version",
+    "label",
+    "reason_codes",
+    "redacted_categories",
+    "latency_ms",
+    "cost_usd",
+    "dataset_version",
+    "report_id",
+    "appeal_outcome",
+    "attempt_count",
+    "record_type",
+    "schema_valid",
 }
 
 
 def safe_audit_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     """Project supplied metadata onto a small allow-list and cap values before persistence."""
+
     safe: dict[str, Any] = {}
+
     for key, value in (metadata or {}).items():
         if key not in _ALLOWED_METADATA or value is None:
             continue
@@ -40,7 +58,10 @@ def safe_audit_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
         elif isinstance(value, str):
             safe[key] = value[:160]
         elif isinstance(value, list | tuple):
-            safe[key] = [str(item)[:80] for item in value[:20] if isinstance(item, str | int)]
+            safe[key] = [
+                str(item)[:80] for item in value[:20] if isinstance(item, str | int)
+            ]
+
     return safe
 
 
@@ -59,7 +80,9 @@ async def record_audit_event(
     actor_roles: list[str] | None = None,
 ) -> AuditEvent:
     """Append an event and extend the tenant hash chain under a locked chain-head row."""
+
     tenant_id = tenant_id[:128]
+
     await session.execute(
         text("""
             INSERT INTO audit_chain_heads (tenant_id, last_sequence, last_hash, updated_at)
@@ -68,18 +91,22 @@ async def record_audit_event(
         """),
         {"tenant_id": tenant_id, "genesis_hash": GENESIS_HASH},
     )
+
     head = await session.scalar(
         select(AuditChainHead)
         .where(AuditChainHead.tenant_id == tenant_id)
         .with_for_update()
         .execution_options(populate_existing=True)
     )
+
     if head is None:
         raise RuntimeError("Unable to allocate audit chain head")
 
     event_id = uuid.uuid4()
     occurred_at = datetime.now(timezone.utc)
-    subject = (actor_subject or (principal.subject if principal else "service:worker"))[:255]
+    subject = (actor_subject or (principal.subject if principal else "service:worker"))[
+        :255
+    ]
     roles = sorted(principal.roles) if principal else (actor_roles or ["service"])
     request_id = (request_id or "")[:64] or None
     action = action[:120]
@@ -89,6 +116,7 @@ async def record_audit_event(
     sanitized_metadata = safe_audit_metadata(metadata)
     sequence_no = head.last_sequence + 1
     previous_hash = head.last_hash
+
     hash_payload = audit_hash_payload(
         event_id=str(event_id),
         occurred_at=occurred_at,
@@ -104,7 +132,9 @@ async def record_audit_event(
         sequence_no=sequence_no,
         previous_hash=previous_hash,
     )
+
     event_hash = calculate_event_hash(hash_payload)
+
     event = AuditEvent(
         id=event_id,
         occurred_at=occurred_at,
@@ -123,13 +153,16 @@ async def record_audit_event(
     )
     head.last_sequence = sequence_no
     head.last_hash = event_hash
+
     session.add(event)
+
     return event
 
 
-async def verify_audit_chain(session: AsyncSession, *, tenant_id: str) -> dict[str, Any]:
+async def verify_audit_chain(
+    session: AsyncSession, *, tenant_id: str
+) -> dict[str, Any]:
     """Verify event sequence, predecessor links, row hashes and stored chain head."""
-    from app.db.models.audit_chain_head import AuditChainHead
 
     # Lock the head before reading rows so concurrent appends cannot produce a false mismatch between
     # the event-list snapshot and the head snapshot under PostgreSQL READ COMMITTED isolation.
@@ -141,28 +174,41 @@ async def verify_audit_chain(session: AsyncSession, *, tenant_id: str) -> dict[s
         """),
         {"tenant_id": tenant_id, "genesis_hash": GENESIS_HASH},
     )
+
     head = await session.scalar(
         select(AuditChainHead)
         .where(AuditChainHead.tenant_id == tenant_id)
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    rows = list((await session.scalars(
-        select(AuditEvent).where(AuditEvent.tenant_id == tenant_id).order_by(AuditEvent.sequence_no.asc())
-    )).all())
+
+    rows = list(
+        (
+            await session.scalars(
+                select(AuditEvent)
+                .where(AuditEvent.tenant_id == tenant_id)
+                .order_by(AuditEvent.sequence_no.asc())
+            )
+        ).all()
+    )
+
     previous_hash = GENESIS_HASH
     expected_sequence = 1
     first_failure: int | None = None
     reason: str | None = None
+
     for event in rows:
+
         if event.sequence_no != expected_sequence:
             first_failure = event.sequence_no
             reason = "sequence_gap_or_reordering"
             break
+
         if event.previous_hash != previous_hash:
             first_failure = event.sequence_no
             reason = "previous_hash_mismatch"
             break
+
         payload = audit_hash_payload(
             event_id=str(event.id),
             occurred_at=event.occurred_at,
@@ -178,19 +224,28 @@ async def verify_audit_chain(session: AsyncSession, *, tenant_id: str) -> dict[s
             sequence_no=event.sequence_no,
             previous_hash=event.previous_hash,
         )
+
         if calculate_event_hash(payload) != event.event_hash:
             first_failure = event.sequence_no
             reason = "event_hash_mismatch"
             break
+
         previous_hash = event.event_hash
         expected_sequence += 1
 
     expected_head_sequence = len(rows)
-    if reason is None and head is not None and (
-        head.last_sequence != expected_head_sequence or head.last_hash != previous_hash
+
+    if (
+        reason is None
+        and head is not None
+        and (
+            head.last_sequence != expected_head_sequence
+            or head.last_hash != previous_hash
+        )
     ):
         first_failure = expected_head_sequence + 1
         reason = "chain_head_mismatch"
+
     elif reason is None and head is None and rows:
         first_failure = 1
         reason = "chain_head_missing"
@@ -207,15 +262,36 @@ async def verify_audit_chain(session: AsyncSession, *, tenant_id: str) -> dict[s
 
 
 async def list_audit_events(
-    session: AsyncSession, *, tenant_id: str, limit: int = 100, offset: int = 0, action: str | None = None
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    limit: int = 100,
+    offset: int = 0,
+    action: str | None = None,
 ) -> tuple[list[AuditEvent], int]:
-    from sqlalchemy import func
 
     filters = [AuditEvent.tenant_id == tenant_id]
+
     if action:
         filters.append(AuditEvent.action == action)
-    items = list((await session.scalars(
-        select(AuditEvent).where(*filters).order_by(AuditEvent.occurred_at.desc()).limit(limit).offset(offset)
-    )).all())
-    count = int(await session.scalar(select(func.count()).select_from(AuditEvent).where(*filters)) or 0)
+
+    items = list(
+        (
+            await session.scalars(
+                select(AuditEvent)
+                .where(*filters)
+                .order_by(AuditEvent.occurred_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+        ).all()
+    )
+
+    count = int(
+        await session.scalar(
+            select(func.count()).select_from(AuditEvent).where(*filters)
+        )
+        or 0
+    )
+
     return items, count

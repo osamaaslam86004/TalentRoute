@@ -24,6 +24,7 @@ async def append_feedback(
     payload: ReviewerFeedbackCreate,
     rubric_version: str,
 ) -> ReviewerFeedback:
+
     item = ReviewerFeedback(
         screening_id=screening_id,
         tenant_id=tenant_id,
@@ -35,8 +36,10 @@ async def append_feedback(
         notes=payload.notes,
         rubric_version=rubric_version,
     )
+
     session.add(item)
     await session.flush()
+
     return item
 
 
@@ -48,6 +51,7 @@ async def append_appeal_outcome(
     principal: Principal,
     payload: AppealCreate,
 ) -> ReviewerFeedback:
+
     item = ReviewerFeedback(
         screening_id=original.screening_id,
         tenant_id=tenant_id,
@@ -61,17 +65,26 @@ async def append_appeal_outcome(
         parent_feedback_id=original.id,
         appeal_outcome=payload.outcome.value,
     )
+
     session.add(item)
     await session.flush()
+
     return item
 
 
 async def get_feedback_by_id(
-    session: AsyncSession, *, feedback_id: uuid.UUID, tenant_id: str, record_type: str | None = None
+    session: AsyncSession,
+    *,
+    feedback_id: uuid.UUID,
+    tenant_id: str,
+    record_type: str | None = None,
 ) -> ReviewerFeedback | None:
+
     stmt = select(ReviewerFeedback).where(
         ReviewerFeedback.id == feedback_id, ReviewerFeedback.tenant_id == tenant_id
     )
+
     if record_type:
         stmt = stmt.where(ReviewerFeedback.record_type == record_type)
+
     return await session.scalar(stmt)

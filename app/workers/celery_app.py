@@ -7,7 +7,7 @@ celery_app = Celery(
     "candidate_screening",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.workers.tasks"],
+    include=["app.workers.tasks", "app.workers.outbox"],
 )
 celery_app.conf.update(
     task_serializer="json",
@@ -15,10 +15,17 @@ celery_app.conf.update(
     accept_content=["json"],
     task_track_started=True,
     task_acks_late=True,
+    task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
     task_time_limit=180,
     task_soft_time_limit=150,
     result_expires=3600,
     timezone="UTC",
     enable_utc=True,
+    beat_schedule={
+        "dispatch-screening-outbox-every-10-seconds": {
+            "task": "app.workers.outbox.dispatch_pending_outbox",
+            "schedule": 10.0,
+        },
+    },
 )

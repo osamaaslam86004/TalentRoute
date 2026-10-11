@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 
 from app.core.config import get_settings
 from app.services.screening_service import process_screening
@@ -20,7 +21,15 @@ settings = get_settings()
 def screen_candidate(self, screening_id: str) -> dict[str, str]:
     """Process one persisted screening record. Retries are bounded in Celery configuration."""
     try:
-        asyncio.run(process_screening(__import__("uuid").UUID(screening_id)))
+        delivery_info = self.request.delivery_info or {}
+        allow_reclaim_running = bool(delivery_info.get("redelivered"))
+
+        asyncio.run(
+            process_screening(
+                uuid.UUID(screening_id),
+                allow_reclaim_running=allow_reclaim_running,
+            )
+        )
     except Exception as exc:
         logger.warning(
             "screening task will retry/fail id=%s retries=%s exception_type=%s",

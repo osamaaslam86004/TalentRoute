@@ -11,16 +11,18 @@ Client
   | OIDC bearer token (preferred) or X-API-Key fallback
   v
 FastAPI / RBAC / tenant boundary
-  |-- PostgreSQL: screening records, audit events, reviewer feedback
-  |-- Redis -> Celery worker
-                 |-- conservative PII minimization
-                 |-- LangGraph -> LangChain/provider
-                 |-- prompt/model provenance + processing audit event
+  |-- PostgreSQL: screenings, hash-chained audit, reviewer feedback, transactional outbox
+  |-- Redis: shared rate limit + Celery broker
+  |-- Celery Beat -> outbox dispatcher -> Celery worker
+                                         |-- conservative PII minimization
+                                         |-- LangGraph -> LangChain/provider
+                                         |-- prompt/model provenance + processing audit event
 ```
 
 - **FastAPI / Pydantic v2:** validated REST endpoints.
 - **PostgreSQL / SQLAlchemy 2 async / Alembic:** durable screening records and versioned schema migrations.
-- **Redis / Celery:** asynchronous assessment work.
+- **Redis / Celery:** asynchronous assessment work with a PostgreSQL transactional outbox, retry/backoff, lease recovery, and a dedicated Celery Beat process.
+- **Submission controls:** tenant/actor-scoped Redis rate limiting, optional `Idempotency-Key` replay protection, request fingerprint conflict detection, and stale-worker recovery.
 - **LangGraph / LangChain:** structured evidence-focused assessment; all recommendations go to a human-review queue.
 - **OIDC/JWT + RBAC:** signature verification using a cached JWKS client, issuer/audience/expiry validation, role/scope checks, and tenant isolation on screening, review, and audit reads.
 - **Audit trail:** per-tenant sequence numbers, SHA-256 hash chaining, allow-listed metadata, integrity verification, and a PostgreSQL mutation guard.
@@ -36,7 +38,7 @@ FastAPI / RBAC / tenant boundary
 
    ```bash
    docker compose up --build -d
-   docker compose logs -f api worker
+   docker compose logs -f api worker beat
    ```
 
 5. Browse `http://localhost:8000/docs` in development. The API docs are disabled in production mode.
@@ -57,6 +59,8 @@ alembic upgrade head
 uvicorn app.main:app --reload
 # In a second terminal after activating the same environment:
 celery -A app.workers.celery_app:celery_app worker --loglevel=INFO
+# In another terminal, run the durable outbox dispatcher schedule:
+celery -A app.workers.celery_app:celery_app beat --loglevel=INFO
 ```
 
 ## Authentication and authorization
@@ -88,7 +92,9 @@ All business endpoints require a principal with the appropriate role/scope.
 
 ### Submit a screening
 
-`POST /api/v1/screenings` returns `202 Accepted` and a poll URL.
+`POST /api/v1/screenings` returns `202 Accepted` and a poll URL. Include an optional stable `Idempotency-Key` (8-128 characters from letters, digits, `.`, `_`, `:`, or `-`) when a client may retry after a network timeout. The key is scoped to the authenticated tenant. Repeating the same key with the same normalized payload returns the existing screening; reusing that key with a different payload returns `409 Conflict`. Omitting the header preserves the non-idempotent legacy behavior.
+
+Submission throughput is limited per tenant and authenticated subject by `SCREENING_RATE_LIMIT_REQUESTS` over `SCREENING_RATE_LIMIT_WINDOW_SECONDS`. If Redis is unavailable, submissions fail closed with `503` by default. `RATE_LIMIT_FAIL_OPEN=true` allows an operator to accept requests during a Redis outage, at the cost of bypassing the limit until Redis recovers.
 
 ```json
 {
@@ -177,9 +183,11 @@ Reviewers fill each `judgment.winner` with `a`, `b`, `tie`, or `both_bad`, and m
 alembic upgrade head
 ```
 
-`0001_initial` creates the original screening table. `0002_enterprise_features` adds tenant/provenance/redaction fields and the audit/feedback tables. Run migrations as a controlled deployment step; review downgrade behavior with the database owner before production use.
+`0001_initial` creates the original screening table. `0002_enterprise_features` adds tenant/provenance/redaction fields and the audit/feedback tables. `0003_outbox_idempotency` adds optional submission idempotency and the transactional outbox. Run migrations as a controlled deployment step; review downgrade behavior with the database owner before production use.
 
-Celery tasks are idempotent for completed records and retry bounded errors. Error details stored on records are stable codes only. The task writes processing success/failure audit events without saving provider exception text. Redis and the broker should be reachable only on private networks and configured with strong credentials.
+A screening record, audit event, and `screening.requested` outbox event commit in the same PostgreSQL transaction. The separate Celery Beat process dispatches pending events; leases recover claims after dispatcher crashes and bounded exponential backoff moves repeatedly failing events to `dead`. Inspect `outbox_events` operationally for `dead` rows and reconcile the cause before requeueing. To retry one event after fixing the cause, run `python scripts/requeue_dead_outbox.py --event-id <event-uuid>`; use `--all-dead --limit 100` only for an intentional batch retry. Broker delivery can be at-least-once, so consumers must remain idempotent. A duplicate worker task is ignored while the record is already running; a running record older than `STALE_PROCESSING_SECONDS` can be reclaimed after a worker crash.
+
+Error details stored on screening records are stable codes only. The task writes processing success/failure audit events without saving provider exception text. Redis and the broker should be reachable only on private networks and configured with strong credentials.
 
 ## Production hardening checklist
 

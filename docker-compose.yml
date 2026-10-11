@@ -77,6 +77,22 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  beat:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://screening:${POSTGRES_PASSWORD:-screening_dev_password}@db:5432/screening
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_dev_password}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_dev_password}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis_dev_password}@redis:6379/2
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "beat", "--loglevel=INFO"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
