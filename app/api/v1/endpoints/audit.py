@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.service import list_audit_events, record_audit_event, verify_audit_chain
 from app.core.security import Principal, require_permission
 from app.db.session import get_db_session
-from app.audit.service import list_audit_events, record_audit_event, verify_audit_chain
 from app.schemas.audit_event import AuditEventList, AuditEventRead, AuditIntegrityRead
 
 router = APIRouter(prefix="/api/v1/audit-events", tags=["audit"])

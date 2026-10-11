@@ -1,7 +1,11 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.assessment import ExperienceAssessment, ExperienceLevel, SkillMatch, SkillsAssessment
+from app.schemas.assessment import (
+    ExperienceAssessment,
+    ExperienceLevel,
+    SkillsAssessment,
+)
 from app.schemas.screening import ScreeningCreateRequest
 
 

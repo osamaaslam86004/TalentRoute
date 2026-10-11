@@ -7,7 +7,6 @@ approved for reviewer use; it deliberately does not export application source te
 
 from __future__ import annotations
 
-import json
 import random
 import uuid
 from typing import Any

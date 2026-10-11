@@ -7,7 +7,7 @@ outbox, while keeping business writes and event creation in one database transac
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, Integer, String, Text, func
+from sqlalchemy import DateTime, Index, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON

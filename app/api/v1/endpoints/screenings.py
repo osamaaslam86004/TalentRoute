@@ -16,13 +16,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.service import record_audit_event
 from app.core.config import get_settings
 from app.core.rate_limit import enforce_screening_rate_limit
 from app.core.security import Principal, require_permission
 from app.db.models.outbox_event import OutboxEvent
 from app.db.models.screening import Screening
 from app.db.session import get_db_session
-from app.audit.service import record_audit_event
 from app.repositories.screenings import get_screening, list_screenings
 from app.schemas.screening import (
     ScreeningAccepted,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 GENESIS_HASH = "0" * 64
@@ -15,7 +15,7 @@ def _timestamp(value: datetime) -> str:
     if value.tzinfo is None:
         raise ValueError("Audit timestamps must be timezone-aware")
 
-    return value.astimezone(timezone.utc).isoformat(timespec="microseconds")
+    return value.astimezone(UTC).isoformat(timespec="microseconds")
 
 
 def audit_hash_payload(

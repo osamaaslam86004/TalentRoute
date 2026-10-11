@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, or_, select, update
 
@@ -22,7 +22,7 @@ async def _claim_batch(limit: int) -> list[tuple[str, str, dict, int]]:
 
     settings = get_settings()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     stale_before = now - timedelta(seconds=settings.outbox_lease_seconds)
 
     async with AsyncSessionLocal() as session:
@@ -85,7 +85,7 @@ async def _mark_dispatched(event_id: str) -> None:
 
         if row is not None:
             row.status = "dispatched"
-            row.dispatched_at = datetime.now(timezone.utc)
+            row.dispatched_at = datetime.now(UTC)
             row.locked_at = None
             row.last_error_code = None
             await session.commit()
@@ -94,7 +94,7 @@ async def _mark_dispatched(event_id: str) -> None:
 async def _mark_failed(event_id: str, attempt_count: int, exception_type: str) -> None:
     settings = get_settings()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     is_dead = attempt_count >= settings.outbox_max_attempts
     delay_seconds = min(2 ** min(attempt_count, 8), 300)
 

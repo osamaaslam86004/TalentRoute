@@ -9,17 +9,16 @@ from __future__ import annotations
 import math
 import uuid
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, text
-from sqlalchemy import func
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.integrity import GENESIS_HASH, audit_hash_payload, calculate_event_hash
 from app.core.security import Principal
 from app.db.models.audit_chain_head import AuditChainHead
 from app.db.models.audit_event import AuditEvent
-from app.audit.integrity import GENESIS_HASH, audit_hash_payload, calculate_event_hash
 
 _ALLOWED_METADATA = {
     "status",
@@ -103,7 +102,7 @@ async def record_audit_event(
         raise RuntimeError("Unable to allocate audit chain head")
 
     event_id = uuid.uuid4()
-    occurred_at = datetime.now(timezone.utc)
+    occurred_at = datetime.now(UTC)
     subject = (actor_subject or (principal.subject if principal else "service:worker"))[
         :255
     ]

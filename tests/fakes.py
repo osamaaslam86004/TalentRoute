@@ -1,4 +1,9 @@
-from app.schemas.assessment import ExperienceAssessment, ExperienceLevel, SkillMatch, SkillsAssessment
+from app.schemas.assessment import (
+    ExperienceAssessment,
+    ExperienceLevel,
+    SkillMatch,
+    SkillsAssessment,
+)
 
 
 class FakeAssessmentProvider:

@@ -2,7 +2,6 @@
 """Create blinded A/B review tasks and a separate private model-identity map."""
 
 import argparse
-import json
 from pathlib import Path
 
 from app.evaluation.evaluation_pipeline import load_jsonl, write_json

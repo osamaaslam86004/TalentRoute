@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable
 
 import jwt
+from fastapi import Depends, HTTPException, Request, Security, status
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
 from jwt.exceptions import PyJWKClientConnectionError, PyJWKClientError, PyJWTError
 
-from fastapi import Depends, HTTPException, Request, Security, status
-from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from app.core.config import Settings, get_settings
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)

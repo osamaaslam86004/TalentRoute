@@ -10,13 +10,13 @@ import argparse
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
+from app.audit.service import record_audit_event
 from app.db.models.outbox_event import OutboxEvent
 from app.db.session import AsyncSessionLocal
-from app.audit.service import record_audit_event
 
 logger = logging.getLogger("outbox.requeue")
 
@@ -44,7 +44,7 @@ async def requeue_dead_events(
         if not all_dead and event_id is None:
             raise ValueError("choose --event-id or explicitly pass --all-dead")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for row in rows:
             prior_attempts = row.attempt_count

@@ -18,10 +18,11 @@ import math
 import random
 import re
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 from statistics import fmean
-from typing import Any, Iterable
+from typing import Any
 
 DATASET_VERSION = "candidate-screening-eval-v1"
 EXPERIENCE_VALUES = {
@@ -472,7 +473,7 @@ def evaluate_predictions(
 
     return {
         "report_version": "screening-evaluation-report-v1",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "dataset_version": dataset_version,
         "sample_count": len(records),
         "gold_count": len(gold_by_id),

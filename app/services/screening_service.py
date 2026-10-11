@@ -1,10 +1,10 @@
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+from app.audit.service import record_audit_event
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
-from app.audit.service import record_audit_event
 from app.privacy.pii_redaction import redact_pii
 from app.repositories.screenings import get_screening
 from app.schemas.assessment import ExperienceAssessment, SkillsAssessment
@@ -33,7 +33,7 @@ async def process_screening(
         if screening.status == "completed":
             return  # Idempotent for task redelivery after a successful commit.
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if (
             screening.status == "running"
@@ -114,7 +114,7 @@ async def process_screening(
                 row.processing_started_at = None
                 row.error_code = "screening_processing_failed"
                 row.redaction_summary = redaction_counts
-                row.processed_at = datetime.now(timezone.utc)
+                row.processed_at = datetime.now(UTC)
 
                 await record_audit_event(
                     session,
@@ -157,7 +157,7 @@ async def process_screening(
         row.prompt_version = PROMPT_VERSION
         row.redaction_summary = redaction.counts
         row.error_code = None
-        row.processed_at = datetime.now(timezone.utc)
+        row.processed_at = datetime.now(UTC)
 
         await record_audit_event(
             session,
