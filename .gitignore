@@ -12,3 +12,12 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+
+# Evaluation artifacts can contain response text and candidate metadata.
+.private/
+reports/*.json
+*.predictions.jsonl
+
+completed_features/
+future_features/
+datasets/
