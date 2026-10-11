@@ -21,3 +21,6 @@ Do not make or recommend a final employment decision. Do not invent facts. Retur
 specific skill gaps for a human reviewer. Confidence is a subjective model estimate, not a calibrated
 probability or a measure of job performance.
 """.strip()
+
+# Increment whenever assessment instructions/rubric behavior changes. Persisted per result for drift review.
+PROMPT_VERSION = "screening-prompts-v1.1.0"

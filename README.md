@@ -1,36 +1,37 @@
-# TalentRoute
+# LangGraph Candidate Screening Service
 
-TalentRoute is a production-oriented Candidate Screening Service that keeps the LangGraph assessment and routing concept but treats output as **decision support only**: it never rejects applicants, schedules interviews, or makes a hiring decision. Every result requires qualified human review.
+An asynchronous FastAPI service that turns the original LangGraph notebook into a structured, auditable **decision-support** workflow. This implementation adds tenant-scoped OIDC/RBAC, privacy-safe audit events, pre-provider PII minimization, append-only human-review/appeal records, model/prompt provenance, and offline evaluation with blinded pairwise review tools.
+
+**Human review is mandatory.** The service never automatically rejects applicants, makes a hiring decision, schedules an interview, or sends candidate communications. Do not use this output as the sole basis for employment decisions.
 
 ## Architecture
 
 ```text
 Client
-  | HTTPS + X-API-Key
+  | OIDC bearer token (preferred) or X-API-Key fallback
   v
-FastAPI (request validation, auth, CRUD)
-  | async SQLAlchemy
-  v
-PostgreSQL <---- Alembic migrations
-  |
-  | screening ID enqueued
-  v
-Redis queue ---> Celery worker ---> LangGraph workflow ---> LangChain/OpenAI-compatible model
-                      |                     |
-                      +---- updates --------+----> PostgreSQL
+FastAPI / RBAC / tenant boundary
+  |-- PostgreSQL: screening records, audit events, reviewer feedback
+  |-- Redis -> Celery worker
+                 |-- conservative PII minimization
+                 |-- LangGraph -> LangChain/provider
+                 |-- prompt/model provenance + processing audit event
 ```
 
-- **FastAPI / Pydantic v2**: validated REST API, versioned endpoints, uniform status model.
-- **PostgreSQL / SQLAlchemy 2 async**: durable screening records, migration-managed schema.
-- **Redis / Celery**: asynchronous jobs keep LLM latency off request threads.
-- **LangGraph / LangChain**: typed evidence-focused assessments and controlled routing.
-- **Docker Compose**: local stack with health checks and one-shot migrations.
+- **FastAPI / Pydantic v2:** validated REST endpoints.
+- **PostgreSQL / SQLAlchemy 2 async / Alembic:** durable screening records and versioned schema migrations.
+- **Redis / Celery:** asynchronous assessment work.
+- **LangGraph / LangChain:** structured evidence-focused assessment; all recommendations go to a human-review queue.
+- **OIDC/JWT + RBAC:** signature verification using a cached JWKS client, issuer/audience/expiry validation, role/scope checks, and tenant isolation on screening, review, and audit reads.
+- **Audit trail:** per-tenant sequence numbers, SHA-256 hash chaining, allow-listed metadata, integrity verification, and a PostgreSQL mutation guard.
+- **PII minimization:** configurable redaction before any provider request; the original application text remains in the restricted database for authorized human review.
+- **Quality pipeline:** versioned synthetic starter dataset, schema/agreement/latency/cost and evidence-grounding proxy metrics, confidence intervals, slice reports, conservative report comparison, and blinded A/B review artifacts.
 
-## Quick start (Docker)
+## Quick start with Docker Compose
 
 1. Copy `.env.example` to `.env`.
-2. Set `API_KEY` to a long random value and put your `OPENAI_API_KEY` in `.env`. Never commit `.env`.
-3. Keep the Compose default PostgreSQL/Redis passwords only for local development. For any shared deployment, supply strong secrets through your secret manager and rotate them.
+2. Change `API_KEY`, `POSTGRES_PASSWORD`, and `REDIS_PASSWORD` for a private development stack. Do not use the example credentials in a shared deployment.
+3. Add an LLM provider key to `.env`. Do not commit secrets.
 4. Run:
 
    ```bash
@@ -38,33 +39,56 @@ Redis queue ---> Celery worker ---> LangGraph workflow ---> LangChain/OpenAI-com
    docker compose logs -f api worker
    ```
 
-5. Open `http://localhost:8000/docs` for the OpenAPI UI. Authenticated endpoints require `X-API-Key` matching `API_KEY`.
+5. Browse `http://localhost:8000/docs` in development. The API docs are disabled in production mode.
 
-Compose injects Redis authentication into service URLs. If running outside Compose, configure `DATABASE_URL`, `REDIS_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND` in `.env` as appropriate.
+The Compose file injects service-local PostgreSQL and Redis URLs. A separately deployed stack must supply its own `DATABASE_URL`, `REDIS_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND` values. Run Alembic migrations before serving requests.
 
 ## Local development
 
-Requires Python 3.11+ and reachable PostgreSQL/Redis instances.
+Requires Python 3.11+, PostgreSQL, and Redis. For a local process (rather than Compose), set database/broker hostnames to `localhost` in `.env`.
 
 ```bash
 python -m venv .venv
 # Windows PowerShell: .venv\Scripts\Activate.ps1
-# Linux/macOS: source .venv/bin/activate
-python -m pip install -e '.[dev]'
+# Linux/macOS/WSL: source .venv/bin/activate
+python -m pip install -e .
 cp .env.example .env  # PowerShell: Copy-Item .env.example .env
 alembic upgrade head
 uvicorn app.main:app --reload
-# In a second terminal:
+# In a second terminal after activating the same environment:
 celery -A app.workers.celery_app:celery_app worker --loglevel=INFO
-# Tests that use the injected fake assessor do not call an external LLM:
-pytest -q
 ```
 
-## API
+## Authentication and authorization
 
-All `/api/v1` endpoints require `X-API-Key` when `API_KEY` is configured. Production mode refuses to start without an API key. TLS should be terminated by a trusted reverse proxy or ingress.
+`AUTH_MODE` supports:
 
-### `POST /api/v1/screenings` (202 Accepted)
+- `oidc`: requires `OIDC_ISSUER`, `OIDC_AUDIENCE`, and `OIDC_JWKS_URL`. JWTs are cryptographically verified; the implementation does not merely decode token payloads. Production requires HTTPS for issuer/JWKS URLs.
+- `api_key`: requires `API_KEY` and uses constant-time comparison. It is a simple single-tenant integration mode, not a replacement for a proper identity provider.
+- `auto`: accepts verified OIDC bearer tokens when OIDC is configured, otherwise uses the API-key fallback. An invalid provided bearer token is rejected instead of silently falling back to a key.
+
+Configure `OIDC_ROLES_CLAIM`, `OIDC_SCOPES_CLAIM`, `OIDC_TENANT_CLAIM`, and `OIDC_ALGORITHMS` to match the identity provider. The default requires a `tenant_id` claim for OIDC tokens. Algorithms are limited to asymmetric signing algorithms. Do not accept tokens from arbitrary issuers or use a shared HMAC secret supplied by an untrusted client.
+
+| Permission | Default role membership | Purpose |
+|---|---|---|
+| `screening:write` | `recruiter`, `service` | Submit work |
+| `screening:read` | `recruiter`, `reviewer`, `auditor`, `privacy_officer` | Read tenant-owned screening results |
+| `screening:delete` | `privacy_officer` | Delete screening/application data |
+| `review:write` | `reviewer` | Submit a human review record |
+| `review:read` | `reviewer`, `auditor` | Read reviewer and appeal history |
+| `review:appeal` | `compliance_officer` | Append an appeal outcome |
+| `audit:read` | `auditor` | Read tenant-scoped audit events |
+| `evaluation:run` | `model_evaluator` | Reserved for authorized evaluation operations |
+
+The `admin` role has all permissions inside its token's tenant. OIDC scopes may independently grant a permission. Role and claim names should be coordinated with the identity provider. With API-key authentication, the principal is mapped to the `default` tenant; do not use that mode as a multi-tenant identity architecture.
+
+## API overview
+
+All business endpoints require a principal with the appropriate role/scope.
+
+### Submit a screening
+
+`POST /api/v1/screenings` returns `202 Accepted` and a poll URL.
 
 ```json
 {
@@ -74,57 +98,89 @@ All `/api/v1` endpoints require `X-API-Key` when `API_KEY` is configured. Produc
 }
 ```
 
-Returns the screening ID and `queued` status. The result is asynchronous; poll the `GET` endpoint.
+### Read results
 
-### `GET /api/v1/screenings/{screening_id}`
-Returns status and, once complete, experience and skill evidence, confidence estimates, gaps, and the suggested *human-review queue*. `application_text` is never returned by API read endpoints.
+- `GET /api/v1/screenings?limit=50&offset=0` lists tenant-owned records.
+- `GET /api/v1/screenings/{screening_id}` returns status and structured evidence, recommendation for a **human-review queue**, model/prompt version, and redaction counts. Raw application text is not returned.
+- `DELETE /api/v1/screenings/{screening_id}` deletes the application record. The audit event is retained; associated feedback is detached from the screening through a nullable foreign key.
 
-### `GET /api/v1/screenings?limit=50&offset=0`
-Paginated listing. Limit is 1-100.
+### Reviewer feedback and appeals
 
-### `DELETE /api/v1/screenings/{screening_id}`
-Deletes a record to support retention/privacy workflows. Production deployments should also define a retention schedule, backups policy, legal basis, and access audit trail.
+- `POST /api/v1/screenings/{screening_id}/feedback` appends a reviewer label, controlled reason codes, rubric version, and optional notes.
+- `GET /api/v1/screenings/{screening_id}/feedback` returns tenant-owned review history.
+- `POST /api/v1/reviews/{feedback_id}/appeals` appends an appeal outcome linked to the original feedback. It never overwrites the original reviewer decision or model output.
 
-### Health
+Human labels include `agree`, `disagree`, `insufficient_evidence`, and `override_recommendation`. Appeal outcomes include `pending`, `upheld`, and `revised`. The database trigger rejects reviewer-feedback updates/deletes, except for the foreign-key detach when the screening itself is deleted; new appeal outcomes are separate linked rows. Reviewer notes can themselves contain sensitive data, so access must be restricted and retention defined. Audit metadata intentionally excludes notes.
 
-- `GET /health/live`: process liveness.
-- `GET /health/ready`: PostgreSQL and Redis connectivity probe.
+### Audit events and health
 
-## Decision-support and safety design
+- `GET /api/v1/audit-events?limit=100&offset=0&action=screening.read` requires audit permission.
+- `GET /api/v1/audit-events/integrity` verifies tenant sequence continuity, predecessor links, event hashes, and the stored chain head.
+- `GET /health/live` is a liveness check.
+- `GET /health/ready` checks database and Redis connectivity.
 
-- Model output is structured and constrained to role-related evidence.
-- Application text is treated as untrusted data, not instructions to the model.
-- The assessor is instructed not to use protected characteristics or proxies.
-- Confidence is a model estimate, not a calibrated probability of job performance.
-- `human_review_required` is always true. Suggested routes are `hr_review`, `recruiter_review`, or `manual_review`; there is no auto-reject branch and no external email/calendar side effect.
-- Do not use these outputs as the sole basis for employment decisions. Validate for disparate impact, provide accessible human review and appeal paths, and obtain legal/privacy review for your jurisdiction.
-- Applicant application text can contain personal data. Restrict database access, use encrypted disks/connections, set retention rules, and avoid sending unnecessary identifiers to an external model.
-- Use a dedicated secret manager, TLS, managed database/Redis, least-privilege network access, backups, observability, and resource limits before production deployment. Compose is a deployment baseline, not a substitute for production operations.
+Audit metadata is allow-listed; the service must never pass full application text, prompts, API keys, provider exception contents, or free-form notes into audit events. The PostgreSQL migration installs a trigger that rejects updates/deletes on `audit_events`. Hash chaining makes row alteration, deletion, or reordering detectable, but a database superuser can disable constraints or alter both events and the chain head. For stronger tamper evidence, periodically export signed head hashes to a separately controlled immutable store. The application role needs `SELECT`/`INSERT` on `audit_events` plus narrowly scoped `SELECT`/`INSERT`/`UPDATE` on `audit_chain_heads`; it should not have audit-table `UPDATE`, `DELETE`, or `TRUNCATE` privileges.
 
-## Configuration
+## PII minimization
 
-See `.env.example`. Important settings include `ENVIRONMENT`, `API_KEY`, `DATABASE_URL`, Redis/Celery URLs, `OPENAI_API_KEY`, `OPENAI_MODEL`, `LLM_BASE_URL`, and `MAX_APPLICATION_CHARS`. `LLM_BASE_URL` supports compatible endpoints, but schema/tool-calling behavior depends on the provider/model.
+The worker keeps the original source text in PostgreSQL for authorized reviewers but passes a redacted copy to the LLM. Configuration:
 
-## Project layout
+- `PII_REDACTION_ENABLED=true` enables it.
+- `PII_REDACTION_POLICY=baseline` masks emails, common phone formats, labelled names/IDs/addresses and similar structured identifiers.
+- `PII_REDACTION_POLICY=strict` additionally catches more unlabelled street-address patterns, with higher false-positive risk.
 
-```text
-app/
-  api/v1/endpoints/       screening and health endpoints
-  core/                   settings, logging, API-key auth
-  db/                     async SQLAlchemy base/session/models
-  repositories/            database access
-  schemas/                request/response and assessment contracts
-  services/               orchestration and persistence
-  workflows/screening/    LangGraph state, prompts, provider, graph
-  workers/                 Celery app and task entry point
-  future_features/         documented extension stubs
-migrations/                Alembic environment and initial migration
-tests/                     graph/schema tests with a fake model provider
+This is a conservative regex baseline, not guaranteed anonymization. It can miss unlabelled, multilingual, misspelled, or novel identifiers and may redact legitimate evidence. For regulated use, replace/augment it with a vetted NER pipeline, localization, human correction, and a documented false-positive/false-negative assessment. Use provider data-processing controls and regional routing as appropriate.
+
+## Offline evaluation and regression gates
+
+The repository includes synthetic, non-applicant fixtures in `datasets/`. Their starter labels are illustrative and must not be represented as a validated hiring benchmark. For production evaluation, use access-controlled, properly licensed/consented data with qualified human-reviewed labels and keep an untouched holdout set.
+
+A prediction JSONL row has `case_id`, `experience_level`, `skills_match`, `recommendation`, `experience_evidence`, and `skills_evidence`. Optional fields include `latency_ms`, `estimated_cost_usd`, `model_version`, `prompt_version`, and `judge_assessment`. See `datasets/schemas/evaluation_prediction.schema.json`.
+
+```bash
+# Score a saved candidate output file without calling a provider
+python scripts/evaluate_offline.py \
+  --dataset datasets/evaluation_v1.jsonl \
+  --predictions /secure/path/candidate.predictions.jsonl \
+  --model-version provider-model-id \
+  --prompt-version screening-prompts-v1.1.0 \
+  --output reports/candidate-report.json
+
+# Compare baseline and candidate reports; a failed gate returns exit code 2
+python scripts/compare_evaluations.py \
+  --baseline /secure/path/baseline-report.json \
+  --candidate reports/candidate-report.json \
+  --output reports/release-gate.json
 ```
 
-## Operational notes
+The evaluation report includes schema validity, exact label agreement against human-gold labels, bootstrap confidence intervals, role-family slices, a lexical evidence-grounding proxy, confidence-calibration diagnostics when confidence scores are provided, prediction distributions, and latency/cost summaries when supplied. Report-to-report release checks compare accuracy, schema validity, slice gaps, output-distribution shift, latency, cost, dataset version, and missing/extra cases. The lexical proxy is not proof of semantic grounding; confidence is explicitly a model estimate and calibration results are unreliable on small datasets. Slice gaps and small sample sizes need human interpretation. An LLM judge may be included in `judge_assessment` to compare judge outputs with human gold; judge agreement is diagnostic and never used as the gold standard. Release gates are conservative operational checks, not proof of fairness, legal compliance, or safe deployment. Passing them does not auto-promote a model or prompt.
 
-- API writes a record before enqueuing. If queue publication fails, the request is marked failed and a 503 is returned; monitor/reconcile such records.
-- Celery tasks retry bounded failures. The worker stores a generic error code rather than provider exception text or applicant content.
-- Add external metrics/tracing, dead-letter handling, durable audit events, idempotency keys, and a managed secret rotation process before scaling beyond a small deployment.
-- See `app/future_features/*.py` for implementation briefs embedded in module docstrings.
+### Blinded pairwise review
+
+To produce anonymized A/B response tasks for reviewers:
+
+```bash
+python scripts/create_pairwise_review.py \
+  --candidate-a /secure/path/model_a.jsonl \
+  --candidate-b /secure/path/model_b.jsonl \
+  --candidate-a-version model-a-prompt-1 \
+  --candidate-b-version model-b-prompt-2 \
+  --public-output reports/blinded-review.json \
+  --private-map-output .private/blinded-review-map.json
+```
+
+Reviewers fill each `judgment.winner` with `a`, `b`, `tie`, or `both_bad`, and may fill a controlled `reason_code`. The private identity map is essential for unblinding and is excluded from version control. Share only the public artifact with reviewers; keep the map in a restricted evaluation workspace. If context is needed, provide a pre-approved redacted `review_context` in the input rows and pass `--include-review-context`. Then summarize judgments using `scripts/score_pairwise_review.py`.
+
+## Database migrations and worker behavior
+
+```bash
+alembic upgrade head
+```
+
+`0001_initial` creates the original screening table. `0002_enterprise_features` adds tenant/provenance/redaction fields and the audit/feedback tables. Run migrations as a controlled deployment step; review downgrade behavior with the database owner before production use.
+
+Celery tasks are idempotent for completed records and retry bounded errors. Error details stored on records are stable codes only. The task writes processing success/failure audit events without saving provider exception text. Redis and the broker should be reachable only on private networks and configured with strong credentials.
+
+## Production hardening checklist
+
+Before production use, configure a managed OIDC provider and role mapping, TLS/mTLS where appropriate, secret-manager injection and rotation, non-default PostgreSQL/Redis credentials, database least-privilege grants, encrypted disks/backups, retention and deletion schedules, external logs/metrics/traces, queue depth and failure alerts, rate limits, request-size limits, disaster recovery, provider privacy terms, and jurisdiction-specific employment/AI/privacy legal review. Include human appeal and accessibility paths and audit disparate impact before using any model output in a consequential process.

@@ -22,7 +22,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    version="1.0.0",
+    version="1.1.0",
     description=(
         "Evidence-focused candidate-screening decision support. Outputs are advisory and require "
         "human review; the service does not make or automate hiring decisions."
@@ -39,7 +39,7 @@ if settings.cors_origins:
         allow_origins=settings.cors_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "X-API-Key", "X-Request-ID"],
+        allow_headers=["Content-Type", "X-API-Key", "Authorization", "X-Request-ID"],
         expose_headers=["X-Request-ID"],
     )
 

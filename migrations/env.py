@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
 from app.db.base import Base
-from app.db.models import Screening  # noqa: F401 - register model metadata
+from app.db.models import AuditChainHead, AuditEvent, ReviewerFeedback, Screening  # noqa: F401 - register model metadata
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))

@@ -58,6 +58,9 @@ class ScreeningRead(BaseModel):
     recommendation: Recommendation | None = None
     recommendation_reason: str | None = None
     human_review_required: bool
+    model_version: str | None = None
+    prompt_version: str | None = None
+    redaction_summary: dict[str, int] | None = None
     error_code: str | None = None
     attempt_count: int
     created_at: datetime

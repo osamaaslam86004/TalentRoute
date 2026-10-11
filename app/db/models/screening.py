@@ -15,9 +15,12 @@ class Screening(Base):
     __tablename__ = "screenings"
     __table_args__ = (
         Index("ix_screenings_status_created_at", "status", "created_at"),
+        Index("ix_screenings_tenant_created_at", "tenant_id", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False, default="default", index=True)
+    request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
     application_text: Mapped[str] = mapped_column(Text, nullable=False)
     job_title: Mapped[str] = mapped_column(String(160), nullable=False)
@@ -33,6 +36,11 @@ class Screening(Base):
     recommendation: Mapped[str | None] = mapped_column(String(32), nullable=True)
     recommendation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     human_review_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    # Audit-friendly provenance for every model-produced assessment.
+    model_version: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    redaction_summary: Mapped[dict[str, int] | None] = mapped_column(json_type, nullable=True)
 
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
