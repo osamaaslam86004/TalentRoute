@@ -24,6 +24,14 @@ dependencies = [
   "langgraph>=0.2,<2.0",
   "httpx>=0.27,<1.0",
   "PyJWT[crypto]>=2.9,<3.0",
+  # Observability. The contrib instrumentation packages are released in lockstep with the SDK and
+  # pin each other, so keep them on one minor series and upgrade them together.
+  "opentelemetry-sdk>=1.45,<2.0",
+  "opentelemetry-exporter-otlp-proto-http>=1.45,<2.0",
+  "opentelemetry-instrumentation-fastapi>=0.66b0,<0.67",
+  "opentelemetry-instrumentation-sqlalchemy>=0.66b0,<0.67",
+  "opentelemetry-instrumentation-redis>=0.66b0,<0.67",
+  "opentelemetry-instrumentation-celery>=0.66b0,<0.67",
 ]
 
 [project.optional-dependencies]

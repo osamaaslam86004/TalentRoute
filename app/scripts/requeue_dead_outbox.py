@@ -17,8 +17,11 @@ from sqlalchemy import select
 from app.audit.service import record_audit_event
 from app.db.models.outbox_event import OutboxEvent
 from app.db.session import AsyncSessionLocal
+from app.observability import setup_observability
 
 logger = logging.getLogger("outbox.requeue")
+# Operator feedback must stay visible whatever LOG_LEVEL is set to.
+logger.setLevel(logging.INFO)
 
 
 async def requeue_dead_events(
@@ -103,9 +106,7 @@ def main() -> int:
     except ValueError:
         parser.error("--event-id must be a UUID")
 
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-    )
+    setup_observability(role="cli")
 
     try:
         changed = asyncio.run(

@@ -14,6 +14,15 @@ class Settings(BaseSettings):
     app_name: str = "LangGraph Candidate Screening API"
     environment: Literal["development", "test", "staging", "production"] = "development"
     log_level: str = "INFO"
+    # `console` keeps the historical human-readable format; `json` emits one object per line.
+    log_format: Literal["console", "json"] = "console"
+    service_name: str = "candidate-screening"
+    service_version: str | None = None  # defaults to the installed package version
+    # Keyed-hash salt for actor identifiers in telemetry. Unset means actor identity is never emitted.
+    telemetry_hash_salt: SecretStr | None = None
+    # LangSmith/LangChain tracing exports prompts that contain applicant data to a third party.
+    # Startup fails in staging/production while it is enabled, unless this is set deliberately.
+    allow_langsmith_tracing: bool = False
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     # `auto` supports OIDC bearer tokens and a constant-time API-key fallback. Prefer OIDC in prod.

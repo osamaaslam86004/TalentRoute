@@ -1,8 +1,11 @@
 from celery import Celery
 
 from app.core.config import get_settings
+from app.observability.policy import enforce_langsmith_policy
 
 settings = get_settings()
+# Worker and beat both import this module; refuse to start with third-party LLM tracing enabled.
+enforce_langsmith_policy(settings)
 celery_app = Celery(
     "candidate_screening",
     broker=settings.celery_broker_url,
