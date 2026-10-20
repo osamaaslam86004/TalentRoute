@@ -19,3 +19,4 @@ reports/*.json
 *.predictions.jsonl
 
 datasets/
+.github/context-mode/sessions/
