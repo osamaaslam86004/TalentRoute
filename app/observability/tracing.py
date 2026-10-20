@@ -25,8 +25,10 @@ _SAFE_METHOD = re.compile(r"^[A-Z]{1,12}$")
 
 def _signal_endpoint(settings: Settings, signal: str) -> str:
     endpoint = settings.otel_exporter_otlp_endpoint.rstrip("/")
+
     if endpoint.endswith(f"/v1/{signal}"):
         return endpoint
+
     if endpoint.endswith("/v1"):
         return f"{endpoint}/{signal}"
     return f"{endpoint}/v1/{signal}"
@@ -37,10 +39,12 @@ def _safe_span_name(span: ReadableSpan, attributes: dict[str, Any]) -> str:
     method = attributes.get(
         "http.request.method", attributes.get("http.method", "HTTP")
     )
+
     if isinstance(route, str) and _SAFE_ROUTE.fullmatch(route):
         method_text = str(method).upper()
         if _SAFE_METHOD.fullmatch(method_text):
             return f"{method_text} {route}"[:160]
+
     if _SAFE_NAME.fullmatch(span.name) and "://" not in span.name:
         return span.name
     return "external.operation"
@@ -50,6 +54,7 @@ def sanitize_span(span: ReadableSpan) -> ReadableSpan:
     """Copy a span while removing disallowed attributes, exception events and status text."""
     attributes = filter_span_attributes(dict(span.attributes or {}))
     safe_events: list[Event] = []
+
     for event in span.events:
         if event.name.lower() in {"exception", "error"}:
             continue
@@ -61,6 +66,7 @@ def sanitize_span(span: ReadableSpan) -> ReadableSpan:
                 attributes=filter_span_attributes(dict(event.attributes or {})),
             )
         )
+
     safe_links = [
         Link(
             context=link.context,
@@ -68,6 +74,7 @@ def sanitize_span(span: ReadableSpan) -> ReadableSpan:
         )
         for link in span.links
     ]
+
     return ReadableSpan(
         name=_safe_span_name(span, attributes),
         context=span.context,
@@ -109,9 +116,12 @@ class SanitizingSpanExporter(SpanExporter):
 
 def initialize_tracing(settings: Settings) -> None:
     """Install a parent-based sampler and asynchronous OTLP exporter once per process."""
+
     global _provider
+
     if not settings.otel_enabled:
         return
+
     with _lock:
         if _provider is not None:
             return
@@ -125,8 +135,10 @@ def initialize_tracing(settings: Settings) -> None:
         from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 
         ratio = settings.otel_trace_sample_ratio
+
         if ratio is None:
             ratio = 0.1 if settings.environment in {"staging", "production"} else 1.0
+
         resource = Resource.create(
             {
                 "service.name": settings.service_name,
@@ -134,9 +146,11 @@ def initialize_tracing(settings: Settings) -> None:
                 "deployment.environment.name": settings.environment,
             }
         )
+
         exporter = SanitizingSpanExporter(
             OTLPSpanExporter(endpoint=_signal_endpoint(settings, "traces"), timeout=5)
         )
+
         processor = BatchSpanProcessor(
             exporter,
             max_queue_size=2048,
@@ -144,6 +158,7 @@ def initialize_tracing(settings: Settings) -> None:
             max_export_batch_size=512,
             export_timeout_millis=5000,
         )
+
         provider = TracerProvider(
             resource=resource,
             sampler=ParentBased(TraceIdRatioBased(ratio)),
@@ -156,6 +171,7 @@ def initialize_tracing(settings: Settings) -> None:
 
 def flush_tracing(timeout_millis: int = 5000) -> bool:
     provider = _provider
+
     if provider is None:
         return True
     try:
@@ -167,11 +183,46 @@ def flush_tracing(timeout_millis: int = 5000) -> bool:
 
 def shutdown_tracing() -> None:
     global _provider
+
     with _lock:
         provider = _provider
         _provider = None
+
     if provider is not None:
         try:
             provider.shutdown()
         except Exception as exc:
             logger.warning("trace shutdown failed error_type=%s", type(exc).__name__)
+
+
+def inject_trace_context(carrier: dict[str, str] | None = None) -> dict[str, str]:
+    """Inject only standard W3C trace context into a small transport carrier.
+
+    The carrier is intended for the transactional outbox and Celery headers. It must never
+    contain request bodies, prompts, candidate data, credentials, or arbitrary baggage.
+    """
+
+    from opentelemetry.trace.propagation.tracecontext import (
+        TraceContextTextMapPropagator,
+    )
+
+    destination = carrier if carrier is not None else {}
+    TraceContextTextMapPropagator().inject(destination)
+
+    return destination
+
+
+def extract_trace_context(carrier: dict[str, str] | None = None):
+    """Extract a W3C parent context from transport metadata, ignoring other fields."""
+    from opentelemetry.trace.propagation.tracecontext import (
+        TraceContextTextMapPropagator,
+    )
+
+    traceparent = (carrier or {}).get("traceparent")
+
+    if not isinstance(traceparent, str) or len(traceparent) > 128:
+        traceparent = None
+
+    return TraceContextTextMapPropagator().extract(
+        {"traceparent": traceparent} if traceparent else {}
+    )

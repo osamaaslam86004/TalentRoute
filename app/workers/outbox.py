@@ -12,13 +12,16 @@ from sqlalchemy import and_, or_, select, update
 from app.core.config import get_settings
 from app.db.models.outbox_event import OutboxEvent
 from app.db.session import AsyncSessionLocal
+from app.observability.metrics import record_outbox_dispatch_lag, record_pipeline_event
+from app.observability.pipeline import traced_stage
 from app.workers.celery_app import celery_app
 from app.workers.tasks import screen_candidate
+from app.workers.telemetry import build_task_headers
 
 logger = logging.getLogger(__name__)
 
 
-async def _claim_batch(limit: int) -> list[tuple[str, str, dict, int]]:
+async def _claim_batch(limit: int) -> list[tuple[str, str, str, dict, int]]:
 
     settings = get_settings()
 
@@ -26,9 +29,7 @@ async def _claim_batch(limit: int) -> list[tuple[str, str, dict, int]]:
     stale_before = now - timedelta(seconds=settings.outbox_lease_seconds)
 
     async with AsyncSessionLocal() as session:
-        # A dispatcher may die after its last permitted claim. Convert an expired
-        # terminal lease to dead-letter state rather than leaving it invisible.
-        await session.execute(
+        expired_result = await session.execute(
             update(OutboxEvent)
             .where(
                 OutboxEvent.status == "dispatching",
@@ -42,6 +43,15 @@ async def _claim_batch(limit: int) -> list[tuple[str, str, dict, int]]:
                 status="dead", locked_at=None, last_error_code="dispatch_lease_expired"
             )
         )
+        expired_count = max(0, int(expired_result.rowcount or 0))
+        if expired_count:
+            record_pipeline_event(
+                "outbox.dead",
+                outcome="dead",
+                stage="outbox",
+                status="dead",
+                value=expired_count,
+            )
         statement = (
             select(OutboxEvent)
             .where(
@@ -73,8 +83,22 @@ async def _claim_batch(limit: int) -> list[tuple[str, str, dict, int]]:
 
         await session.commit()
 
+        if rows:
+            record_pipeline_event(
+                "outbox.claimed",
+                outcome="success",
+                stage="outbox",
+                status="dispatching",
+                value=len(rows),
+            )
         return [
-            (str(row.id), row.event_type, dict(row.payload), row.attempt_count)
+            (
+                str(row.id),
+                row.tenant_id,
+                row.event_type,
+                dict(row.payload),
+                row.attempt_count,
+            )
             for row in rows
         ]
 
@@ -89,6 +113,12 @@ async def _mark_dispatched(event_id: str) -> None:
             row.locked_at = None
             row.last_error_code = None
             await session.commit()
+            record_pipeline_event(
+                "outbox.dispatched",
+                outcome="success",
+                stage="outbox",
+                status="dispatched",
+            )
 
 
 async def _mark_failed(event_id: str, attempt_count: int, exception_type: str) -> None:
@@ -107,6 +137,13 @@ async def _mark_failed(event_id: str, attempt_count: int, exception_type: str) -
             row.available_at = now + timedelta(seconds=delay_seconds)
             row.last_error_code = f"dispatch_{exception_type[:64]}"
             await session.commit()
+            record_pipeline_event(
+                "outbox.dead" if is_dead else "outbox.failed",
+                outcome="dead" if is_dead else "failure",
+                stage="outbox",
+                error_type=exception_type[:64],
+                status=row.status,
+            )
 
     logger.error(
         "outbox dispatch failed event_id=%s attempt=%s terminal=%s error_type=%s",
@@ -117,21 +154,38 @@ async def _mark_failed(event_id: str, attempt_count: int, exception_type: str) -
     )
 
 
-async def _dispatch_once() -> dict[str, int]:
+async def _dispatch_once_inner() -> dict[str, int]:
     settings = get_settings()
 
     batch = await _claim_batch(settings.outbox_batch_size)
     dispatched = 0
     failed = 0
 
-    for event_id, event_type, payload, attempt_count in batch:
+    for event_id, tenant_id, event_type, payload, attempt_count in batch:
         try:
             if event_type != "screening.requested":
                 raise ValueError("unsupported_event_type")
 
             screening_id = str(uuid.UUID(str(payload["screening_id"])))
-            screen_candidate.apply_async(args=[screening_id], task_id=event_id)
-
+            enqueued_at = payload.get("enqueued_at")
+            queued_at: datetime | None = None
+            if isinstance(enqueued_at, str):
+                try:
+                    parsed = datetime.fromisoformat(enqueued_at.replace("Z", "+00:00"))
+                    queued_at = parsed if parsed.tzinfo is not None else None
+                except ValueError:
+                    queued_at = None
+            headers = build_task_headers(
+                payload, tenant_id=tenant_id, event_id=event_id
+            )
+            with traced_stage("outbox.dispatch", screening_id=screening_id):
+                screen_candidate.apply_async(
+                    args=[screening_id], task_id=event_id, headers=headers
+                )
+            if queued_at is not None:
+                record_outbox_dispatch_lag(
+                    max(0.0, (datetime.now(UTC) - queued_at).total_seconds())
+                )
             await _mark_dispatched(event_id)
             dispatched += 1
 
@@ -148,6 +202,12 @@ async def _dispatch_once() -> dict[str, int]:
         )
 
     return {"claimed": len(batch), "dispatched": dispatched, "failed": failed}
+
+
+async def _dispatch_once() -> dict[str, int]:
+    """Dispatch one batch under a parent span; per-event spans are created by the inner loop."""
+    with traced_stage("outbox.batch"):
+        return await _dispatch_once_inner()
 
 
 @celery_app.task(name="app.workers.outbox.dispatch_pending_outbox")

@@ -18,11 +18,39 @@ _request_counter: Any | None = None
 _request_duration: Any | None = None
 _auth_failure_counter: Any | None = None
 _rate_limit_counter: Any | None = None
+_pipeline_events: Any | None = None
+_screening_duration: Any | None = None
+_queue_wait_duration: Any | None = None
+_end_to_end_duration: Any | None = None
+_outbox_dispatch_lag: Any | None = None
 _ALLOWED_AUTH_REASONS = frozenset(
     {"missing", "invalid", "forbidden", "jwks_unavailable"}
 )
 _ALLOWED_RATE_DECISIONS = frozenset(
     {"allowed", "limited", "backend_error_closed", "backend_error_open"}
+)
+_PIPELINE_EVENT_TYPES = frozenset(
+    {
+        "outbox.claimed",
+        "outbox.dispatched",
+        "outbox.failed",
+        "outbox.dead",
+        "celery.task.started",
+        "celery.task.completed",
+        "celery.task.retry",
+        "celery.task.failed",
+        "screening.duplicate",
+        "screening.reclaimed",
+        "screening.completed",
+        "screening.failed",
+        "pipeline.other",
+    }
+)
+_PIPELINE_OUTCOMES = frozenset(
+    {"success", "failure", "retry", "dead", "duplicate", "reclaimed", "unknown"}
+)
+_PIPELINE_STAGES = frozenset(
+    {"outbox", "celery", "claim", "redact", "graph", "persist", "unknown"}
 )
 
 
@@ -38,6 +66,8 @@ def _signal_endpoint(settings: Settings, signal: str) -> str:
 def initialize_metrics(settings: Settings) -> None:
     """Create an asynchronous OTLP metric reader once per process when telemetry is enabled."""
     global _provider, _request_counter, _request_duration, _auth_failure_counter, _rate_limit_counter
+    global _pipeline_events, _screening_duration, _queue_wait_duration
+    global _end_to_end_duration, _outbox_dispatch_lag
     if not settings.otel_enabled:
         return
     with _lock:
@@ -86,6 +116,31 @@ def initialize_metrics(settings: Settings) -> None:
             unit="{decision}",
             description="Screening rate-limit decisions",
         )
+        _pipeline_events = meter.create_counter(
+            "app.pipeline.events",
+            unit="{event}",
+            description="Outbox and screening worker lifecycle events",
+        )
+        _screening_duration = meter.create_histogram(
+            "app.screening.processing.duration",
+            unit="s",
+            description="Screening task execution time",
+        )
+        _queue_wait_duration = meter.create_histogram(
+            "app.pipeline.queue.wait",
+            unit="s",
+            description="Time from outbox enqueue to worker start",
+        )
+        _end_to_end_duration = meter.create_histogram(
+            "app.screening.end_to_end.duration",
+            unit="s",
+            description="Time from screening enqueue to processing completion",
+        )
+        _outbox_dispatch_lag = meter.create_histogram(
+            "app.outbox.dispatch.lag",
+            unit="s",
+            description="Time from outbox enqueue to broker dispatch",
+        )
         _provider = provider
 
 
@@ -128,6 +183,70 @@ def record_rate_limit_decision(decision: str) -> None:
     _safe_add(_rate_limit_counter, 1, attributes)
 
 
+def record_pipeline_event(
+    event_type: str,
+    *,
+    outcome: str,
+    stage: str,
+    error_type: str | None = None,
+    status: str | None = None,
+    value: int = 1,
+) -> None:
+    """Record a pipeline event using fixed vocabularies and low-cardinality labels only."""
+    normalized_event = (
+        event_type if event_type in _PIPELINE_EVENT_TYPES else "pipeline.other"
+    )
+    normalized_outcome = outcome if outcome in _PIPELINE_OUTCOMES else "unknown"
+    normalized_stage = stage if stage in _PIPELINE_STAGES else "unknown"
+    attributes = sanitize_metric_labels(
+        {
+            "event_type": normalized_event,
+            "outcome": normalized_outcome,
+            "stage": normalized_stage,
+            "error_type": error_type,
+            "status": status,
+        }
+    )
+    _safe_add(_pipeline_events, max(0, int(value)), attributes)
+
+
+def _record_duration(
+    instrument: Any | None,
+    seconds: float,
+    attributes: dict[str, str] | None = None,
+) -> None:
+    if instrument is None:
+        return
+    try:
+        value = float(seconds)
+        if value < 0 or value != value or value == float("inf"):
+            return
+        instrument.record(value, attributes or {})
+    except Exception as exc:  # telemetry must never change task behavior
+        logger.debug("duration metric failed error_type=%s", type(exc).__name__)
+
+
+def record_screening_duration(seconds: float, outcome: str) -> None:
+    normalized = (
+        outcome if outcome in {"success", "failure", "retry", "unknown"} else "unknown"
+    )
+    _record_duration(
+        _screening_duration, seconds, sanitize_metric_labels({"outcome": normalized})
+    )
+
+
+def record_queue_wait(seconds: float) -> None:
+    _record_duration(_queue_wait_duration, seconds)
+
+
+def record_end_to_end_duration(seconds: float) -> None:
+    _record_duration(_end_to_end_duration, seconds)
+
+
+def record_outbox_dispatch_lag(seconds: float) -> None:
+    _record_duration(_outbox_dispatch_lag, seconds)
+
+
 def flush_metrics(timeout_millis: int = 5000) -> bool:
     provider = _provider
     if provider is None:
@@ -141,11 +260,15 @@ def flush_metrics(timeout_millis: int = 5000) -> bool:
 
 def shutdown_metrics() -> None:
     global _provider, _request_counter, _request_duration, _auth_failure_counter, _rate_limit_counter
+    global _pipeline_events, _screening_duration, _queue_wait_duration
+    global _end_to_end_duration, _outbox_dispatch_lag
     with _lock:
         provider = _provider
         _provider = None
         _request_counter = _request_duration = None
         _auth_failure_counter = _rate_limit_counter = None
+        _pipeline_events = _screening_duration = _queue_wait_duration = None
+        _end_to_end_duration = _outbox_dispatch_lag = None
     if provider is not None:
         try:
             provider.shutdown(timeout_millis=5000)

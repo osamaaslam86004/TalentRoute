@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from app.audit.service import record_audit_event
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
+from app.observability.metrics import record_pipeline_event
+from app.observability.pipeline import traced_stage
 from app.privacy.pii_redaction import redact_pii
 from app.repositories.screenings import get_screening
 from app.schemas.assessment import ExperienceAssessment, SkillsAssessment
@@ -22,7 +24,8 @@ async def process_screening(
     settings = get_settings()
 
     async with AsyncSessionLocal() as session:
-        screening = await get_screening(session, screening_id, for_update=True)
+        with traced_stage("claim", screening_id=str(screening_id)):
+            screening = await get_screening(session, screening_id, for_update=True)
 
         if screening is None:
             logger.warning(
@@ -31,6 +34,7 @@ async def process_screening(
             return
 
         if screening.status == "completed":
+            record_pipeline_event("screening.duplicate", outcome="duplicate", stage="claim")
             return  # Idempotent for task redelivery after a successful commit.
 
         now = datetime.now(UTC)
@@ -46,12 +50,14 @@ async def process_screening(
                 and age_seconds < settings.stale_processing_seconds
             ):
                 logger.info("duplicate screening task ignored id=%s", screening_id)
+                record_pipeline_event("screening.duplicate", outcome="duplicate", stage="claim")
                 return
 
             if allow_reclaim_running:
                 logger.warning(
                     "reclaiming redelivered running task id=%s", screening_id
                 )
+                record_pipeline_event("screening.reclaimed", outcome="reclaimed", stage="claim")
 
             else:
                 logger.warning(
@@ -75,31 +81,39 @@ async def process_screening(
     redacted_categories: list[str] = []
 
     try:
-        redaction = redact_pii(
-            raw_application_text,
-            enabled=settings.pii_redaction_enabled,
-            policy=settings.pii_redaction_policy,
-        )
+        with traced_stage("redact", screening_id=str(screening_id)):
+            redaction = redact_pii(
+                raw_application_text,
+                enabled=settings.pii_redaction_enabled,
+                policy=settings.pii_redaction_policy,
+            )
 
         redaction_counts = redaction.counts
         redacted_categories = redaction.categories
 
         graph = create_screening_graph()
 
-        result = await graph.ainvoke(
-            {
-                "screening_id": str(screening_id),
-                "application_text": redaction.text[: settings.max_application_chars],
-                "job_title": job_title,
-                "required_skills": required_skills,
-            }
-        )
+        with traced_stage("graph", screening_id=str(screening_id)):
+            result = await graph.ainvoke(
+                {
+                    "screening_id": str(screening_id),
+                    "application_text": redaction.text[: settings.max_application_chars],
+                    "job_title": job_title,
+                    "required_skills": required_skills,
+                }
+            )
 
         experience: ExperienceAssessment = result["experience_assessment"]
         skills: SkillsAssessment = result["skills_assessment"]
 
     except Exception as exc:
         # Store a stable error code only; provider exceptions can contain request details or sensitive text.
+        record_pipeline_event(
+            "screening.failed",
+            outcome="failure",
+            stage="persist",
+            error_type=type(exc).__name__,
+        )
         logger.error(
             "screening processing failed id=%s error_type=%s",
             screening_id,
@@ -132,7 +146,8 @@ async def process_screening(
                         "redacted_categories": redacted_categories,
                     },
                 )
-                await session.commit()
+                with traced_stage("persist", screening_id=str(screening_id)):
+                    await session.commit()
         raise
 
     async with AsyncSessionLocal() as session:
@@ -175,4 +190,6 @@ async def process_screening(
                 "attempt_count": row.attempt_count,
             },
         )
-        await session.commit()
+        with traced_stage("persist", screening_id=str(screening_id)):
+            await session.commit()
+        record_pipeline_event("screening.completed", outcome="success", stage="persist")

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import (
     APIRouter,
@@ -30,6 +31,7 @@ from app.schemas.screening import (
     ScreeningList,
     ScreeningRead,
 )
+from app.observability.tracing import inject_trace_context
 
 router = APIRouter(prefix="/api/v1/screenings", tags=["screenings"])
 
@@ -124,7 +126,12 @@ async def create_screening(
                 tenant_id=principal.tenant_id,
                 event_type="screening.requested",
                 aggregate_id=str(row.id),
-                payload={"screening_id": str(row.id)},
+                payload={
+                    "screening_id": str(row.id),
+                    "request_id": getattr(request.state, "request_id", None),
+                    "enqueued_at": datetime.now(UTC).isoformat(),
+                    **inject_trace_context(),
+                },
                 status="pending",
             )
         )
