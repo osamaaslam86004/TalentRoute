@@ -1,0 +1,153 @@
+"""Vendor-neutral RED metrics with strict low-cardinality labels and OTLP export."""
+
+from __future__ import annotations
+
+import logging
+from threading import Lock
+from typing import Any
+
+from opentelemetry import metrics
+
+from app.core.config import Settings
+from app.observability.policy import sanitize_metric_labels
+
+logger = logging.getLogger(__name__)
+_lock = Lock()
+_provider: Any | None = None
+_request_counter: Any | None = None
+_request_duration: Any | None = None
+_auth_failure_counter: Any | None = None
+_rate_limit_counter: Any | None = None
+_ALLOWED_AUTH_REASONS = frozenset(
+    {"missing", "invalid", "forbidden", "jwks_unavailable"}
+)
+_ALLOWED_RATE_DECISIONS = frozenset(
+    {"allowed", "limited", "backend_error_closed", "backend_error_open"}
+)
+
+
+def _signal_endpoint(settings: Settings, signal: str) -> str:
+    endpoint = settings.otel_exporter_otlp_endpoint.rstrip("/")
+    if endpoint.endswith(f"/v1/{signal}"):
+        return endpoint
+    if endpoint.endswith("/v1"):
+        return f"{endpoint}/{signal}"
+    return f"{endpoint}/v1/{signal}"
+
+
+def initialize_metrics(settings: Settings) -> None:
+    """Create an asynchronous OTLP metric reader once per process when telemetry is enabled."""
+    global _provider, _request_counter, _request_duration, _auth_failure_counter, _rate_limit_counter
+    if not settings.otel_enabled:
+        return
+    with _lock:
+        if _provider is not None:
+            return
+        from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
+            OTLPMetricExporter,
+        )
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+        from opentelemetry.sdk.resources import Resource
+
+        resource = Resource.create(
+            {
+                "service.name": settings.service_name,
+                "service.version": settings.service_version or "unknown",
+                "deployment.environment.name": settings.environment,
+            }
+        )
+        exporter = OTLPMetricExporter(
+            endpoint=_signal_endpoint(settings, "metrics"), timeout=5
+        )
+        reader = PeriodicExportingMetricReader(
+            exporter, export_interval_millis=5000, export_timeout_millis=5000
+        )
+        provider = MeterProvider(resource=resource, metric_readers=[reader])
+        metrics.set_meter_provider(provider)
+        meter = metrics.get_meter("app.observability", "1.0.0")
+        _request_counter = meter.create_counter(
+            "app.http.server.request.count",
+            unit="{request}",
+            description="Completed HTTP requests",
+        )
+        _request_duration = meter.create_histogram(
+            "app.http.server.request.duration",
+            unit="s",
+            description="HTTP request duration",
+        )
+        _auth_failure_counter = meter.create_counter(
+            "auth.failures",
+            unit="{failure}",
+            description="Authentication and authorization failures",
+        )
+        _rate_limit_counter = meter.create_counter(
+            "screening.rate_limit.decisions",
+            unit="{decision}",
+            description="Screening rate-limit decisions",
+        )
+        _provider = provider
+
+
+def _safe_add(instrument: Any | None, value: int, attributes: dict[str, str]) -> None:
+    if instrument is None:
+        return
+    try:
+        instrument.add(value, attributes)
+    except Exception as exc:  # telemetry must not affect application behavior
+        logger.debug("metric update failed error_type=%s", type(exc).__name__)
+
+
+def record_http_request(
+    *, route: str, method: str, status_code: int, duration_seconds: float
+) -> None:
+    if _request_counter is None:
+        return
+    status_class = f"{max(0, min(5, int(status_code) // 100))}xx"
+    attributes = sanitize_metric_labels(
+        {"route": route, "method": method, "status_class": status_class}
+    )
+    _safe_add(_request_counter, 1, attributes)
+    try:
+        _request_duration.record(max(0.0, float(duration_seconds)), attributes)
+    except Exception as exc:
+        logger.debug("metric observation failed error_type=%s", type(exc).__name__)
+
+
+def record_auth_failure(reason: str) -> None:
+    normalized = reason if reason in _ALLOWED_AUTH_REASONS else "invalid"
+    attributes = sanitize_metric_labels({"reason": normalized})
+    _safe_add(_auth_failure_counter, 1, attributes)
+
+
+def record_rate_limit_decision(decision: str) -> None:
+    normalized = (
+        decision if decision in _ALLOWED_RATE_DECISIONS else "backend_error_closed"
+    )
+    attributes = sanitize_metric_labels({"decision": normalized})
+    _safe_add(_rate_limit_counter, 1, attributes)
+
+
+def flush_metrics(timeout_millis: int = 5000) -> bool:
+    provider = _provider
+    if provider is None:
+        return True
+    try:
+        return bool(provider.force_flush(timeout_millis=timeout_millis))
+    except Exception as exc:
+        logger.warning("metric flush failed error_type=%s", type(exc).__name__)
+        return False
+
+
+def shutdown_metrics() -> None:
+    global _provider, _request_counter, _request_duration, _auth_failure_counter, _rate_limit_counter
+    with _lock:
+        provider = _provider
+        _provider = None
+        _request_counter = _request_duration = None
+        _auth_failure_counter = _rate_limit_counter = None
+    if provider is not None:
+        try:
+            provider.shutdown(timeout_millis=5000)
+        except Exception as exc:
+            logger.warning("metric shutdown failed error_type=%s", type(exc).__name__)

@@ -7,23 +7,45 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
-from app.core.logging import configure_logging
 from app.core.rate_limit import close_rate_limit_client
 from app.db.session import engine
+from app.observability import setup_observability
+from app.observability.instrumentation import instrument_api, uninstrument_api
+from app.observability.metrics import (
+    flush_metrics,
+    initialize_metrics,
+    shutdown_metrics,
+)
+from app.observability.middleware import RequestTelemetryMiddleware
+from app.observability.tracing import (
+    flush_tracing,
+    initialize_tracing,
+    shutdown_tracing,
+)
 
-configure_logging()
 settings = get_settings()
+setup_observability("api", settings)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    if settings.otel_enabled:
+        initialize_tracing(settings)
+        initialize_metrics(settings)
     try:
         yield
     finally:
         try:
             await close_rate_limit_client()
         finally:
-            await engine.dispose()
+            try:
+                await engine.dispose()
+            finally:
+                uninstrument_api(app, settings)
+                flush_metrics()
+                flush_tracing()
+                shutdown_metrics()
+                shutdown_tracing()
 
 
 app = FastAPI(
@@ -54,6 +76,8 @@ if settings.cors_origins:
         ],
         expose_headers=["X-Request-ID"],
     )
+
+app.add_middleware(RequestTelemetryMiddleware)
 
 
 @app.middleware("http")
@@ -86,13 +110,21 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         getattr(request.state, "request_id", "unknown"),
         type(exc).__name__,
     )
+    request_id = getattr(request.state, "request_id", None)
     return JSONResponse(
         status_code=500,
+        headers={
+            "X-Request-ID": request_id or "unknown",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "Referrer-Policy": "no-referrer",
+        },
         content={
             "detail": "Internal server error",
-            "request_id": getattr(request.state, "request_id", None),
+            "request_id": request_id,
         },
     )
 
 
 app.include_router(api_router)
+instrument_api(app, engine, settings)

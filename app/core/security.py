@@ -15,6 +15,9 @@ from jwt import PyJWKClient
 from jwt.exceptions import PyJWKClientConnectionError, PyJWKClientError, PyJWTError
 
 from app.core.config import Settings, get_settings
+from app.observability.context import bind_context
+from app.observability.metrics import record_auth_failure
+from app.observability.policy import actor_hash
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 _bearer = HTTPBearer(auto_error=False, scheme_name="OIDC Bearer Token")
@@ -71,8 +74,10 @@ def _claim_strings(value: object) -> frozenset[str]:
     return frozenset()
 
 
-def _unauthorized(detail: str = "Authentication required") -> HTTPException:
-
+def _unauthorized(
+    detail: str = "Authentication required", *, reason: str = "invalid"
+) -> HTTPException:
+    record_auth_failure(reason)
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail=detail,
@@ -80,9 +85,19 @@ def _unauthorized(detail: str = "Authentication required") -> HTTPException:
     )
 
 
-def _decode_oidc_token(token: str, settings: Settings) -> Principal:
+def _bind_principal(request: Request, principal: Principal, settings: Settings) -> None:
+    """Bind trusted identifiers; never place the raw subject in telemetry context."""
+    request.state.actor_subject = principal.subject
+    request.state.tenant_id = principal.tenant_id
+    bind_context(
+        tenant_id=principal.tenant_id,
+        actor_hash=actor_hash(principal.subject, settings),
+    )
 
+
+def _decode_oidc_token(token: str, settings: Settings) -> Principal:
     if not (settings.oidc_issuer and settings.oidc_audience and settings.oidc_jwks_url):
+        record_auth_failure("jwks_unavailable")
         raise HTTPException(
             status_code=503, detail="OIDC authentication is not configured"
         )
@@ -106,6 +121,7 @@ def _decode_oidc_token(token: str, settings: Settings) -> Principal:
         )
 
     except PyJWKClientConnectionError as exc:
+        record_auth_failure("jwks_unavailable")
         raise HTTPException(
             status_code=503, detail="Identity provider signing keys are unavailable"
         ) from exc
@@ -126,6 +142,7 @@ def _decode_oidc_token(token: str, settings: Settings) -> Principal:
     if settings.oidc_require_tenant_claim and (
         not isinstance(tenant, str) or not tenant.strip()
     ):
+        record_auth_failure("forbidden")
         raise HTTPException(
             status_code=403, detail="Access token is missing the tenant claim"
         )
@@ -133,6 +150,7 @@ def _decode_oidc_token(token: str, settings: Settings) -> Principal:
     if tenant and (
         len(str(tenant)) > 128 or any(ord(char) < 32 for char in str(tenant))
     ):
+        record_auth_failure("forbidden")
         raise HTTPException(
             status_code=403, detail="Access token has an invalid tenant claim"
         )
@@ -175,15 +193,11 @@ async def get_principal(
         principal = await asyncio.to_thread(
             _decode_oidc_token, bearer.credentials, settings
         )
-        request.state.actor_subject = principal.subject
-        request.state.tenant_id = principal.tenant_id
+        _bind_principal(request, principal, settings)
         return principal
-
     if settings.auth_mode == "oidc":
-        raise _unauthorized()
-
+        raise _unauthorized(reason="missing" if provided_key is None else "invalid")
     expected = settings.api_key.get_secret_value() if settings.api_key else None
-
     if expected and provided_key and hmac.compare_digest(provided_key, expected):
         principal = Principal(
             subject="api-key-client",
@@ -192,10 +206,8 @@ async def get_principal(
             scopes=frozenset({"*"}),
             auth_method="api_key",
         )
-        request.state.actor_subject = principal.subject
-        request.state.tenant_id = principal.tenant_id
+        _bind_principal(request, principal, settings)
         return principal
-
     if (
         settings.auth_mode == "auto"
         and expected is None
@@ -208,22 +220,17 @@ async def get_principal(
             scopes=frozenset({"*"}),
             auth_method="development",
         )
-
-        request.state.actor_subject = principal.subject
-        request.state.tenant_id = principal.tenant_id
-
+        _bind_principal(request, principal, settings)
         return principal
-
-    raise _unauthorized("Invalid or missing credentials")
+    reason = "missing" if bearer is None and not provided_key else "invalid"
+    raise _unauthorized("Invalid or missing credentials", reason=reason)
 
 
 def require_permission(permission: str) -> Callable:
-
     async def dependency(principal: Principal = Depends(get_principal)) -> Principal:
-
         if not principal.can(permission):
+            record_auth_failure("forbidden")
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-
         return principal
 
     dependency.__name__ = f"require_{permission.replace(':', '_')}"

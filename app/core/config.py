@@ -9,7 +9,9 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 class Settings(BaseSettings):
     """Runtime configuration. Secrets must be injected by the deployment environment."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     app_name: str = "LangGraph Candidate Screening API"
     environment: Literal["development", "test", "staging", "production"] = "development"
@@ -23,6 +25,11 @@ class Settings(BaseSettings):
     # LangSmith/LangChain tracing exports prompts that contain applicant data to a third party.
     # Startup fails in staging/production while it is enabled, unless this is set deliberately.
     allow_langsmith_tracing: bool = False
+    # OTel is opt-in by default so local development does not require an OTLP collector.
+    otel_enabled: bool = False
+    otel_exporter_otlp_endpoint: str = "http://localhost:4318"
+    # Unset chooses 100% in development/test and 10% in staging/production.
+    otel_trace_sample_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     # `auto` supports OIDC bearer tokens and a constant-time API-key fallback. Prefer OIDC in prod.
@@ -35,9 +42,13 @@ class Settings(BaseSettings):
     oidc_scopes_claim: str = "scope"
     oidc_tenant_claim: str = "tenant_id"
     oidc_require_tenant_claim: bool = True
-    oidc_algorithms: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["RS256"])
+    oidc_algorithms: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["RS256"]
+    )
 
-    database_url: str = "postgresql+asyncpg://screening:screening_dev_password@localhost:5432/screening"
+    database_url: str = (
+        "postgresql+asyncpg://screening:screening_dev_password@localhost:5432/screening"
+    )
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
@@ -80,28 +91,44 @@ class Settings(BaseSettings):
         if self.auth_mode == "oidc" and not all(
             (self.oidc_issuer, self.oidc_audience, self.oidc_jwks_url)
         ):
-            raise ValueError("OIDC_ISSUER, OIDC_AUDIENCE, and OIDC_JWKS_URL are required for AUTH_MODE=oidc")
+            raise ValueError(
+                "OIDC_ISSUER, OIDC_AUDIENCE, and OIDC_JWKS_URL are required for AUTH_MODE=oidc"
+            )
 
         if self.oidc_issuer or self.oidc_audience or self.oidc_jwks_url:
             if not all((self.oidc_issuer, self.oidc_audience, self.oidc_jwks_url)):
-                raise ValueError("OIDC_ISSUER, OIDC_AUDIENCE, and OIDC_JWKS_URL must be configured together")
+                raise ValueError(
+                    "OIDC_ISSUER, OIDC_AUDIENCE, and OIDC_JWKS_URL must be configured together"
+                )
             for name in ("oidc_issuer", "oidc_jwks_url"):
                 parsed = urlparse(getattr(self, name) or "")
-                if parsed.scheme not in ({"https"} if self.environment == "production" else {"http", "https"}):
+                if parsed.scheme not in (
+                    {"https"} if self.environment == "production" else {"http", "https"}
+                ):
                     raise ValueError(f"{name.upper()} must use HTTPS in production")
 
         allowed_algorithms = {"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"}
-        if not self.oidc_algorithms or any(item not in allowed_algorithms for item in self.oidc_algorithms):
-            raise ValueError("OIDC_ALGORITHMS must contain only supported asymmetric signing algorithms")
+        if not self.oidc_algorithms or any(
+            item not in allowed_algorithms for item in self.oidc_algorithms
+        ):
+            raise ValueError(
+                "OIDC_ALGORITHMS must contain only supported asymmetric signing algorithms"
+            )
 
         if self.auth_mode == "api_key" and not self.api_key:
             raise ValueError("API_KEY is required when AUTH_MODE=api_key")
         if self.environment == "production":
-            oidc_ready = bool(self.oidc_issuer and self.oidc_audience and self.oidc_jwks_url)
+            oidc_ready = bool(
+                self.oidc_issuer and self.oidc_audience and self.oidc_jwks_url
+            )
             if self.auth_mode == "oidc" and not oidc_ready:
-                raise ValueError("Complete OIDC configuration is required in production")
+                raise ValueError(
+                    "Complete OIDC configuration is required in production"
+                )
             if self.auth_mode == "auto" and not (self.api_key or oidc_ready):
-                raise ValueError("Configure OIDC or API_KEY for production authentication")
+                raise ValueError(
+                    "Configure OIDC or API_KEY for production authentication"
+                )
         return self
 
 

@@ -12,6 +12,7 @@ from redis.exceptions import RedisError
 
 from app.core.config import get_settings
 from app.core.security import Principal
+from app.observability.metrics import record_rate_limit_decision
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,11 @@ def _redis_client(url: str) -> Redis:
     return Redis.from_url(
         url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2
     )
+
+
+def get_rate_limit_redis_client() -> Redis:
+    """Return the shared Redis client used by submission limits and readiness probes."""
+    return _redis_client(get_settings().redis_url)
 
 
 async def enforce_screening_rate_limit(request: Request, principal: Principal) -> None:
@@ -56,8 +62,9 @@ async def enforce_screening_rate_limit(request: Request, principal: Principal) -
         )
 
         if settings.rate_limit_fail_open:
+            record_rate_limit_decision("backend_error_open")
             return
-
+        record_rate_limit_decision("backend_error_closed")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Submission rate limiter is temporarily unavailable",
@@ -65,11 +72,13 @@ async def enforce_screening_rate_limit(request: Request, principal: Principal) -
         ) from exc
 
     if count > settings.screening_rate_limit_requests:
+        record_rate_limit_decision("limited")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Screening submission rate limit exceeded",
             headers={"Retry-After": str(ttl)},
         )
+    record_rate_limit_decision("allowed")
 
 
 async def close_rate_limit_client() -> None:
