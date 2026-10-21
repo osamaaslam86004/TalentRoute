@@ -1,0 +1,9 @@
+{
+  "title": "Audit Chain Metrics",
+  "panels": [
+    {
+      "title": "Audit Chain Validity",
+      "type": "stat"
+    }
+  ]
+}

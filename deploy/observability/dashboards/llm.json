@@ -1,0 +1,9 @@
+{
+  "title": "LLM Metrics",
+  "panels": [
+    {
+      "title": "LLM Call Duration",
+      "type": "timeseries"
+    }
+  ]
+}

@@ -22,3 +22,4 @@ datasets/
 .github/context-mode/sessions/
 Plan.md
 repomix-output.txt
+*.patch

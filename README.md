@@ -73,16 +73,16 @@ celery -A app.workers.celery_app:celery_app beat --loglevel=INFO
 
 Configure `OIDC_ROLES_CLAIM`, `OIDC_SCOPES_CLAIM`, `OIDC_TENANT_CLAIM`, and `OIDC_ALGORITHMS` to match the identity provider. The default requires a `tenant_id` claim for OIDC tokens. Algorithms are limited to asymmetric signing algorithms. Do not accept tokens from arbitrary issuers or use a shared HMAC secret supplied by an untrusted client.
 
-| Permission | Default role membership | Purpose |
-|---|---|---|
-| `screening:write` | `recruiter`, `service` | Submit work |
-| `screening:read` | `recruiter`, `reviewer`, `auditor`, `privacy_officer` | Read tenant-owned screening results |
-| `screening:delete` | `privacy_officer` | Delete screening/application data |
-| `review:write` | `reviewer` | Submit a human review record |
-| `review:read` | `reviewer`, `auditor` | Read reviewer and appeal history |
-| `review:appeal` | `compliance_officer` | Append an appeal outcome |
-| `audit:read` | `auditor` | Read tenant-scoped audit events |
-| `evaluation:run` | `model_evaluator` | Reserved for authorized evaluation operations |
+| Permission         | Default role membership                               | Purpose                                       |
+| ------------------ | ----------------------------------------------------- | --------------------------------------------- |
+| `screening:write`  | `recruiter`, `service`                                | Submit work                                   |
+| `screening:read`   | `recruiter`, `reviewer`, `auditor`, `privacy_officer` | Read tenant-owned screening results           |
+| `screening:delete` | `privacy_officer`                                     | Delete screening/application data             |
+| `review:write`     | `reviewer`                                            | Submit a human review record                  |
+| `review:read`      | `reviewer`, `auditor`                                 | Read reviewer and appeal history              |
+| `review:appeal`    | `compliance_officer`                                  | Append an appeal outcome                      |
+| `audit:read`       | `auditor`                                             | Read tenant-scoped audit events               |
+| `evaluation:run`   | `model_evaluator`                                     | Reserved for authorized evaluation operations |
 
 The `admin` role has all permissions inside its token's tenant. OIDC scopes may independently grant a permission. Role and claim names should be coordinated with the identity provider. With API-key authentication, the principal is mapped to the `default` tenant; do not use that mode as a multi-tenant identity architecture.
 
@@ -188,6 +188,14 @@ alembic upgrade head
 A screening record, audit event, and `screening.requested` outbox event commit in the same PostgreSQL transaction. The separate Celery Beat process dispatches pending events; leases recover claims after dispatcher crashes and bounded exponential backoff moves repeatedly failing events to `dead`. Inspect `outbox_events` operationally for `dead` rows and reconcile the cause before requeueing. To retry one event after fixing the cause, run `python scripts/requeue_dead_outbox.py --event-id <event-uuid>`; use `--all-dead --limit 100` only for an intentional batch retry. Broker delivery can be at-least-once, so consumers must remain idempotent. A duplicate worker task is ignored while the record is already running; a running record older than `STALE_PROCESSING_SECONDS` can be reclaimed after a worker crash.
 
 Error details stored on screening records are stable codes only. The task writes processing success/failure audit events without saving provider exception text. Redis and the broker should be reachable only on private networks and configured with strong credentials.
+
+## Observability and Monitoring
+
+The service includes vendor-neutral OpenTelemetry instrumentation (metrics and traces) and structured JSON logging adhering to strict privacy guardrails (no applicant text or prompts in telemetry). Use `make obs-up` to launch local observability stack (Collector, Prometheus, Grafana).
+
+### Alerting and Runbooks
+
+Prometheus alerts monitor dead-letter outboxes, audit chain validity, and 5xx error rates. Refer to `docs/observability.md` for complete operator runbooks and operational recovery commands.
 
 ## Production hardening checklist
 

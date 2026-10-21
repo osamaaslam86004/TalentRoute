@@ -1,0 +1,9 @@
+{
+  "title": "Pipeline & Outbox Metrics",
+  "panels": [
+    {
+      "title": "Outbox Pending & Dead",
+      "type": "timeseries"
+    }
+  ]
+}

@@ -17,3 +17,7 @@ down:
 	docker compose down
 logs:
 	docker compose logs -f api worker
+obs-up:
+	docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build -d
+obs-down:
+	docker compose -f docker-compose.yml -f docker-compose.observability.yml down

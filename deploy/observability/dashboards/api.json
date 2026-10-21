@@ -1,0 +1,10 @@
+{
+  "title": "API RED Metrics",
+  "panels": [
+    {
+      "title": "Request Count",
+      "type": "timeseries",
+      "targets": [{ "expr": "sum(rate(app_http_server_request_count[1m]))" }]
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+groups:
+  - name: screening-alerts
+    rules:
+      - alert: OutboxDeadLettersExist
+        expr: app_outbox_dead > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Dead-letter outbox events detected"
+          description: "There are dead-letter outbox events requiring operator review and requeue."
+
+      - alert: AuditIntegrityFailure
+        expr: audit_chain_valid == 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: "Audit chain integrity check failed"
+          description: "Tamper-evident audit event hash chain verification failed."
+
+      - alert: HighErrorRate5xx
+        expr: rate(app_http_server_request_count{status_class="5xx"}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High HTTP 5xx error rate"
