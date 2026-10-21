@@ -19,8 +19,5 @@ reports/*.json
 *.predictions.jsonl
 
 datasets/
+local/
 .github/context-mode/sessions/
-Plan.md
-repomix-output.txt
-*.patch
-observability_implementation_audit_report.md

@@ -11,10 +11,12 @@ from typing import Literal
 from app.core.config import Settings, get_settings
 from app.observability.logging import configure_logging
 from app.observability.policy import enforce_langsmith_policy
+from app.observability.metrics import shutdown_metrics
+from app.observability.tracing import shutdown_tracing
 
 Role = Literal["api", "worker", "beat", "cli"]
 
-__all__ = ["Role", "setup_observability"]
+__all__ = ["Role", "setup_observability", "shutdown_observability"]
 
 
 def setup_observability(role: Role = "api", settings: Settings | None = None) -> None:
@@ -27,3 +29,9 @@ def setup_observability(role: Role = "api", settings: Settings | None = None) ->
     settings = settings or get_settings()
     enforce_langsmith_policy(settings)
     configure_logging(settings, role=role)
+
+
+def shutdown_observability() -> None:
+    """Flush and shut down tracing and metrics providers."""
+    shutdown_metrics()
+    shutdown_tracing()

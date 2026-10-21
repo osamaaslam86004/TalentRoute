@@ -57,11 +57,15 @@ async def collect_pipeline_statistics() -> dict[str, int | float]:
         redis_client = get_rate_limit_redis_client()
         queue_len = await redis_client.llen("celery")
         stats["redis_celery_queue_length"] = queue_len
+
+        hb = await redis_client.get("dispatcher:heartbeat")
+        stats["dispatcher_heartbeat_present"] = 1 if hb else 0
+
     except Exception as exc:
         logger.warning(
             "failed to check redis queue length error_type=%s", type(exc).__name__
         )
-        stats["redis_celery_queue_length"] = -1
+        stats["dispatcher_heartbeat_present"] = 0
 
     record_pipeline_event("pipeline.stats_collected", outcome="success", stage="outbox")
     logger.info("pipeline stats collected: %s", stats)

@@ -14,6 +14,8 @@ from app.db.models.outbox_event import OutboxEvent
 from app.db.session import AsyncSessionLocal
 from app.observability.metrics import record_outbox_dispatch_lag, record_pipeline_event
 from app.observability.pipeline import traced_stage
+from app.observability.tracing import extract_trace_context
+from app.core.rate_limit import get_rate_limit_redis_client
 from app.workers.celery_app import celery_app
 from app.workers.tasks import screen_candidate
 from app.workers.telemetry import build_task_headers
@@ -91,6 +93,14 @@ async def _claim_batch(limit: int) -> list[tuple[str, str, str, dict, int]]:
                 status="dispatching",
                 value=len(rows),
             )
+            try:
+                redis_client = get_rate_limit_redis_client()
+                await redis_client.set(
+                    "dispatcher:heartbeat", datetime.now(UTC).isoformat(), ex=120
+                )
+            except Exception:
+                pass
+
         return [
             (
                 str(row.id),
@@ -169,6 +179,7 @@ async def _dispatch_once_inner() -> dict[str, int]:
             screening_id = str(uuid.UUID(str(payload["screening_id"])))
             enqueued_at = payload.get("enqueued_at")
             queued_at: datetime | None = None
+
             if isinstance(enqueued_at, str):
                 try:
                     parsed = datetime.fromisoformat(enqueued_at.replace("Z", "+00:00"))
@@ -178,10 +189,16 @@ async def _dispatch_once_inner() -> dict[str, int]:
             headers = build_task_headers(
                 payload, tenant_id=tenant_id, event_id=event_id
             )
-            with traced_stage("outbox.dispatch", screening_id=screening_id):
+
+            with traced_stage(
+                "outbox.dispatch",
+                screening_id=screening_id,
+                context=extract_trace_context(payload),
+            ):
                 screen_candidate.apply_async(
                     args=[screening_id], task_id=event_id, headers=headers
                 )
+
             if queued_at is not None:
                 record_outbox_dispatch_lag(
                     max(0.0, (datetime.now(UTC) - queued_at).total_seconds())

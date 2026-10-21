@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -15,7 +17,9 @@ _TRACER = trace.get_tracer("app.screening.pipeline")
 
 
 @contextmanager
-def traced_stage(stage: str, *, screening_id: str | None = None) -> Iterator[Span]:
+def traced_stage(
+    stage: str, *, screening_id: str | None = None, context: Any | None = None
+) -> Iterator[Span]:
     """Create a stage span without recording application text or any caller-supplied content."""
 
     safe_stage = stage if stage in _ALLOWED_STAGES else "unknown"
@@ -25,6 +29,6 @@ def traced_stage(stage: str, *, screening_id: str | None = None) -> Iterator[Spa
         attributes["app.screening_id"] = screening_id
 
     with _TRACER.start_as_current_span(
-        f"screening.{safe_stage}", attributes=attributes
+        f"screening.{safe_stage}", attributes=attributes, context=context
     ) as span:
         yield span
