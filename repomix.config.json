@@ -18,7 +18,6 @@
       "poetry.lock",
       "Pipfile.lock",
       "pdm.lock",
-      "requirements*.txt",
       "**/__pycache__/**",
       "**/*.pyc",
       "**/*.pyo",
@@ -35,8 +34,7 @@
       "**/staticfiles/**",
       "**/static/**",
       "**/dist/**",
-      "**/build/**",
-      "**/tests/**"
+      "**/build/**"
     ]
   }
 }

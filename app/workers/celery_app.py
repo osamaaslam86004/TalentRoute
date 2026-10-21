@@ -37,4 +37,4 @@ celery_app.conf.update(
     },
 )
 
-import app.workers.celery_signals
+import app.observability.celery_signals
