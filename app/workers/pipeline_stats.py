@@ -11,7 +11,7 @@ from sqlalchemy import delete, func, select
 from app.core.rate_limit import get_rate_limit_redis_client
 from app.db.models.outbox_event import OutboxEvent
 from app.db.models.screening import Screening
-from app.db.session import AsyncSessionLocal
+from app.db.session import AsyncSessionLocal, engine
 from app.observability.metrics import record_pipeline_event, record_pipeline_gauges
 from app.workers.celery_app import celery_app
 
@@ -70,10 +70,21 @@ async def collect_pipeline_statistics() -> dict[str, int | float]:
         stats["screenings_stale_running"] = stale_running_count or 0
 
     try:
+        pool = engine.sync_engine.pool
+        stats["db_pool_in_use"] = pool.checkedout()
+        stats["db_pool_available"] = pool.checkedin()
+
+    except Exception as exc:
+        logger.warning(
+            "failed to collect db pool stats error_type=%s", type(exc).__name__
+        )
+        stats["db_pool_in_use"] = 0
+        stats["db_pool_available"] = 0
+
+    try:
         redis_client = get_rate_limit_redis_client()
         queue_len = await redis_client.llen("celery")
         stats["redis_celery_queue_length"] = queue_len
-
         hb = await redis_client.get("dispatcher:heartbeat")
         stats["dispatcher_heartbeat_present"] = 1 if hb else 0
 

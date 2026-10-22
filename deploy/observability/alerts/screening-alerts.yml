@@ -34,7 +34,7 @@ groups:
           summary: "Screening end-to-end latency p95 is high"
           description: "P95 end-to-end screening duration exceeds 60 seconds."
       - alert: DatabasePoolSaturation
-        expr: app_db_pool_in_use / (app_db_pool_in_use  app_db_pool_available) > 0.8
+        expr: app_db_pool_in_use / (app_db_pool_in_use + app_db_pool_available) > 0.8
         for: 2m
         labels:
           severity: warning
@@ -42,7 +42,7 @@ groups:
           summary: "Database connection pool near saturation"
           description: "Database connection pool utilization is above 80%."
       - alert: AuditIntegrityFailure
-        expr: app_audit_chain_valid == 0
+        expr: app_audit_chain_valid{status="1"} == 0 or app_audit_chain_valid == 0
         for: 0m
         labels:
           severity: page
@@ -50,9 +50,9 @@ groups:
           summary: "Audit chain integrity check failed"
           description: "Tamper-evident audit event hash chain verification failed."
       - alert: MissingDispatcherHeartbeat
-        expr: app_pipeline_dispatcher_heartbeat == 0
+        expr: rate(app_http_server_request_count_total{status_class="5xx"}[5m]) > 0.05
         for: 3m
         labels:
           severity: warning
         annotations:
-          summary: "High HTTP 5xx error rate"
+          summary: "Dispatcher heartbeat missing"

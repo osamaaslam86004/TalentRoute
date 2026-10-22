@@ -28,6 +28,8 @@ _outbox_pending_gauge: Any | None = None
 _redis_queue_gauge: Any | None = None
 _dispatcher_heartbeat_gauge: Any | None = None
 _audit_chain_valid_gauge: Any | None = None
+_db_pool_in_use_gauge: Any | None = None
+_db_pool_available_gauge: Any | None = None
 
 _ALLOWED_AUTH_REASONS = frozenset(
     {"missing", "invalid", "forbidden", "jwks_unavailable"}
@@ -75,6 +77,7 @@ def initialize_metrics(settings: Settings) -> None:
     global _pipeline_events, _screening_duration, _queue_wait_duration
     global _end_to_end_duration, _outbox_dispatch_lag
     global _outbox_dead_gauge, _outbox_pending_gauge, _redis_queue_gauge, _dispatcher_heartbeat_gauge, _audit_chain_valid_gauge
+    global _db_pool_available_gauge, _db_pool_in_use_gauge
 
     if not settings.otel_enabled:
         return
@@ -173,6 +176,16 @@ def initialize_metrics(settings: Settings) -> None:
             "app.audit.chain_valid",
             unit="{status}",
             description="Audit chain integrity status (1=valid, 0=invalid)",
+        )
+        _db_pool_in_use_gauge = meter.create_gauge(
+            "app.db.pool.in_use",
+            unit="{connection}",
+            description="Database pool connections currently checked out",
+        )
+        _db_pool_available_gauge = meter.create_gauge(
+            "app.db.pool.available",
+            unit="{connection}",
+            description="Database pool available connections",
         )
         _provider = provider
 
@@ -282,6 +295,7 @@ def record_outbox_dispatch_lag(seconds: float) -> None:
 
 def record_pipeline_gauges(stats: dict[str, int | float], audit_valid: int = 1) -> None:
     global _outbox_dead_gauge, _outbox_pending_gauge, _redis_queue_gauge, _dispatcher_heartbeat_gauge, _audit_chain_valid_gauge
+    global _db_pool_in_use_gauge, _db_pool_available_gauge
 
     try:
         if _outbox_dead_gauge is not None:
@@ -295,6 +309,10 @@ def record_pipeline_gauges(stats: dict[str, int | float], audit_valid: int = 1) 
             _dispatcher_heartbeat_gauge.set(float(hb))
         if _audit_chain_valid_gauge is not None:
             _audit_chain_valid_gauge.set(float(audit_valid))
+        if _db_pool_in_use_gauge is not None:
+            _db_pool_in_use_gauge.set(float(stats.get("db_pool_in_use", 0)))
+        if _db_pool_available_gauge is not None:
+            _db_pool_available_gauge.set(float(stats.get("db_pool_available", 0)))
     except Exception as exc:
         logger.debug("pipeline gauge update failed error_type=%s", type(exc).__name__)
 

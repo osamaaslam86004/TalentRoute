@@ -7,11 +7,13 @@ import time
 
 from sqlalchemy import event
 
+from app.observability.metrics import _record_duration
+
 logger = logging.getLogger(__name__)
 
 
 def register_db_pool_listeners(engine) -> None:
-    """Register checkout/checkin listeners to measure pool wait times without logging SQL statements."""
+    """Register checkout/checkin/connect listeners to measure pool wait times and metrics."""
 
     @event.listens_for(engine.sync_engine, "checkout")
     def on_checkout(dbapi_connection, connection_record, connection_proxy) -> None:
@@ -23,3 +25,7 @@ def register_db_pool_listeners(engine) -> None:
         if checkout_time is not None:
             duration = time.perf_counter() - checkout_time
             logger.debug("db connection checkout duration_ms=%.2f", duration * 1000)
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def on_connect(dbapi_connection, connection_record) -> None:
+        logger.debug("db connection established")

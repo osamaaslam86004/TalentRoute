@@ -15,6 +15,7 @@ from app.observability.metrics import (
     flush_metrics,
     initialize_metrics,
     shutdown_metrics,
+    record_http_request,
 )
 from app.observability.middleware import RequestTelemetryMiddleware
 from app.observability.tracing import (
@@ -90,7 +91,20 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         getattr(request.state, "request_id", "unknown"),
         type(exc).__name__,
     )
+
     request_id = getattr(request.state, "request_id", None)
+    try:
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", "unmatched") if route else "unmatched"
+        record_http_request(
+            route=route_path,
+            method=request.method,
+            status_code=500,
+            duration_seconds=0.0,
+        )
+    except Exception:
+        pass
+
     return JSONResponse(
         status_code=500,
         headers={
