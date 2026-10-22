@@ -6,13 +6,11 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
 from app.db.base import Base
-from app.db.models import (
-    AuditChainHead,
-    AuditEvent,
-    OutboxEvent,
-    ReviewerFeedback,
-    Screening,
-)
+from app.db.models.audit_chain_head import AuditChainHead
+from app.db.models.audit_event import AuditEvent
+from app.db.models.outbox_event import OutboxEvent
+from app.db.models.reviewer_feedback import ReviewerFeedback
+from app.db.models.screening import Screening
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))

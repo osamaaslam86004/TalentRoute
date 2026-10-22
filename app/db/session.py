@@ -13,7 +13,9 @@ engine = create_async_engine(
     max_overflow=10,
     pool_recycle=1800,
 )
+
 register_db_pool_listeners(engine)
+
 AsyncSessionLocal = async_sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False
 )
