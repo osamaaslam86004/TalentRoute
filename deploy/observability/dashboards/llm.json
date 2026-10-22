@@ -3,7 +3,30 @@
   "panels": [
     {
       "title": "LLM Call Duration",
-      "type": "timeseries"
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(app_screening_processing_duration_bucket[1m]))"
+        }
+      ]
+    },
+    {
+      "title": "LLM Completed vs Failed Events",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(app_pipeline_events{event_type=~\"llm.*\"}[1m])) by (event_type)"
+        }
+      ]
+    },
+    {
+      "title": "Screening Processing Duration",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(app_screening_processing_duration_bucket[1m]))"
+        }
+      ]
     }
   ]
 }

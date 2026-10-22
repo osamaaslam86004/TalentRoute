@@ -1,4 +1,5 @@
-﻿amqp==5.4.1
+﻿alembic==1.20.0
+amqp==5.4.1
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1
@@ -37,6 +38,8 @@ langgraph-checkpoint==4.2.0
 langgraph-prebuilt==1.1.0
 langgraph-sdk==0.4.6
 langsmith==0.14.7
+Mako==1.4.3
+MarkupSafe==3.0.4
 openai==3.29.0
 opentelemetry-api==1.45.0
 opentelemetry-exporter-http-transport==0.66b0

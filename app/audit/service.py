@@ -161,103 +161,107 @@ async def record_audit_event(
 async def verify_audit_chain(
     session: AsyncSession, *, tenant_id: str
 ) -> dict[str, Any]:
-    """Verify event sequence, predecessor links, row hashes and stored chain head."""
+    """Verify event sequence, predecessor links, row hashes and stored chain head
+    using a Repeatable Read snapshot to prevent race conditions without blocking concurrent appends.
+    """
 
-    # Lock the head before reading rows so concurrent appends cannot produce a false mismatch between
-    # the event-list snapshot and the head snapshot under PostgreSQL READ COMMITTED isolation.
-    await session.execute(
-        text("""
-            INSERT INTO audit_chain_heads (tenant_id, last_sequence, last_hash, updated_at)
-            VALUES (:tenant_id, 0, :genesis_hash, CURRENT_TIMESTAMP)
-            ON CONFLICT (tenant_id) DO NOTHING
-        """),
-        {"tenant_id": tenant_id, "genesis_hash": GENESIS_HASH},
-    )
+    # Start a transaction with REPEATABLE READ isolation to ensure snapshot consistency.
+    async with session.begin_nested():
+        await session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
 
-    head = await session.scalar(
-        select(AuditChainHead)
-        .where(AuditChainHead.tenant_id == tenant_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
+        await session.execute(
+            text("""
+                INSERT INTO audit_chain_heads (tenant_id, last_sequence, last_hash, updated_at)
+                VALUES (:tenant_id, 0, :genesis_hash, CURRENT_TIMESTAMP)
+                ON CONFLICT (tenant_id) DO NOTHING
+            """),
+            {"tenant_id": tenant_id, "genesis_hash": GENESIS_HASH},
+        )
 
-    rows = list(
-        (
-            await session.scalars(
-                select(AuditEvent)
-                .where(AuditEvent.tenant_id == tenant_id)
-                .order_by(AuditEvent.sequence_no.asc())
+        head = await session.scalar(
+            select(AuditChainHead)
+            .where(AuditChainHead.tenant_id == tenant_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+
+        rows = list(
+            (
+                await session.scalars(
+                    select(AuditEvent)
+                    .where(AuditEvent.tenant_id == tenant_id)
+                    .order_by(AuditEvent.sequence_no.asc())
+                )
+            ).all()
+        )
+
+        previous_hash = GENESIS_HASH
+        expected_sequence = 1
+        first_failure: int | None = None
+        reason: str | None = None
+
+        for event in rows:
+
+            if event.sequence_no != expected_sequence:
+                first_failure = event.sequence_no
+                reason = "sequence_gap_or_reordering"
+                break
+
+            if event.previous_hash != previous_hash:
+                first_failure = event.sequence_no
+                reason = "previous_hash_mismatch"
+                break
+
+            payload = audit_hash_payload(
+                event_id=str(event.id),
+                occurred_at=event.occurred_at,
+                tenant_id=event.tenant_id,
+                actor_subject=event.actor_subject,
+                actor_roles=event.actor_roles,
+                request_id=event.request_id,
+                action=event.action,
+                resource_type=event.resource_type,
+                resource_id=event.resource_id,
+                outcome=event.outcome,
+                metadata=event.event_metadata,
+                sequence_no=event.sequence_no,
+                previous_hash=event.previous_hash,
             )
-        ).all()
-    )
 
-    previous_hash = GENESIS_HASH
-    expected_sequence = 1
-    first_failure: int | None = None
-    reason: str | None = None
+            if calculate_event_hash(payload) != event.event_hash:
+                first_failure = event.sequence_no
+                reason = "event_hash_mismatch"
+                break
 
-    for event in rows:
+            previous_hash = event.event_hash
+            expected_sequence += 1
 
-        if event.sequence_no != expected_sequence:
-            first_failure = event.sequence_no
-            reason = "sequence_gap_or_reordering"
-            break
+        expected_head_sequence = len(rows)
 
-        if event.previous_hash != previous_hash:
-            first_failure = event.sequence_no
-            reason = "previous_hash_mismatch"
-            break
+        if (
+            reason is None
+            and head is not None
+            and (
+                head.last_sequence != expected_head_sequence
+                or head.last_hash != previous_hash
+            )
+        ):
+            first_failure = expected_head_sequence + 1
+            reason = "chain_head_mismatch"
 
-        payload = audit_hash_payload(
-            event_id=str(event.id),
-            occurred_at=event.occurred_at,
-            tenant_id=event.tenant_id,
-            actor_subject=event.actor_subject,
-            actor_roles=event.actor_roles,
-            request_id=event.request_id,
-            action=event.action,
-            resource_type=event.resource_type,
-            resource_id=event.resource_id,
-            outcome=event.outcome,
-            metadata=event.event_metadata,
-            sequence_no=event.sequence_no,
-            previous_hash=event.previous_hash,
-        )
+        elif reason is None and head is None and rows:
+            first_failure = 1
+            reason = "chain_head_missing"
 
-        if calculate_event_hash(payload) != event.event_hash:
-            first_failure = event.sequence_no
-            reason = "event_hash_mismatch"
-            break
-
-        previous_hash = event.event_hash
-        expected_sequence += 1
-
-    expected_head_sequence = len(rows)
-
-    if (
-        reason is None
-        and head is not None
-        and (
-            head.last_sequence != expected_head_sequence
-            or head.last_hash != previous_hash
-        )
-    ):
-        first_failure = expected_head_sequence + 1
-        reason = "chain_head_mismatch"
-
-    elif reason is None and head is None and rows:
-        first_failure = 1
-        reason = "chain_head_missing"
-
-    return {
-        "tenant_id": tenant_id,
-        "valid": reason is None,
-        "event_count": len(rows),
-        "head_sequence": head.last_sequence if head is not None else 0,
-        "first_failure_sequence": first_failure,
-        "failure_reason": reason,
-        "head_hash": head.last_hash if head is not None else GENESIS_HASH,
-    }
+        return {
+            "tenant_id": tenant_id,
+            "valid": reason is None,
+            "event_count": len(rows),
+            "head_sequence": head.last_sequence if head is not None else 0,
+            "first_failure_sequence": first_failure,
+            "failure_reason": reason,
+            "head_hash": head.last_hash if head is not None else GENESIS_HASH,
+        }
 
 
 async def list_audit_events(

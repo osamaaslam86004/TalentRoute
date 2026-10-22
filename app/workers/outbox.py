@@ -227,7 +227,7 @@ async def _dispatch_once() -> dict[str, int]:
         return await _dispatch_once_inner()
 
 
-@celery_app.task(name="app.workers.outbox.dispatch_pending_outbox")
+@celery_app.task(name="app.workers.outbox.dispatch_pending_outbox", queue="outbox")
 def dispatch_pending_outbox() -> dict[str, int]:
     """Dispatch one bounded outbox batch. Celery Beat schedules this task."""
 

@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import delete, func, select
 
 from app.core.rate_limit import get_rate_limit_redis_client
 from app.db.models.outbox_event import OutboxEvent
 from app.db.models.screening import Screening
 from app.db.session import AsyncSessionLocal
-from app.observability.metrics import record_pipeline_event
+from app.observability.metrics import record_pipeline_event, record_pipeline_gauges
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,21 @@ async def collect_pipeline_statistics() -> dict[str, int | float]:
     stats: dict[str, int | float] = {}
 
     async with AsyncSessionLocal() as session:
+        try:
+            cutoff = now - timedelta(days=7)
+            await session.execute(
+                delete(OutboxEvent).where(
+                    OutboxEvent.status == "dispatched",
+                    OutboxEvent.dispatched_at < cutoff,
+                )
+            )
+            await session.commit()
+        except Exception as exc:
+            logger.warning(
+                "failed to prune dispatched outbox events error_type=%s",
+                type(exc).__name__,
+            )
+
         outbox_counts = dict(
             (
                 await session.execute(
@@ -68,7 +84,10 @@ async def collect_pipeline_statistics() -> dict[str, int | float]:
         stats["dispatcher_heartbeat_present"] = 0
 
     record_pipeline_event("pipeline.stats_collected", outcome="success", stage="outbox")
+    record_pipeline_gauges(stats)
+
     logger.info("pipeline stats collected: %s", stats)
+
     return stats
 
 

@@ -9,19 +9,49 @@ groups:
         annotations:
           summary: "Dead-letter outbox events detected"
           description: "There are dead-letter outbox events requiring operator review and requeue."
-
+      - alert: OldestPendingOutboxHigh
+        expr: app_outbox_pending > 0 and time() - app_outbox_oldest_pending_timestamp > 300
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Oldest pending outbox event is aging"
+          description: "Pending outbox events have been waiting for more than 5 minutes."
+      - alert: HighErrorRate5xx
+        expr: rate(app_http_server_request_count{status_class="5xx"}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High HTTP 5xx error rate detected"
+          description: "HTTP 5xx error rate exceeds 5% over the last 5 minutes."
+      - alert: ScreeningEndToEndLatencyHigh
+        expr: histogram_quantile(0.95, rate(app_screening_end_to_end_duration_bucket[5m])) > 60
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Screening end-to-end latency p95 is high"
+          description: "P95 end-to-end screening duration exceeds 60 seconds."
+      - alert: DatabasePoolSaturation
+        expr: app_db_pool_in_use / (app_db_pool_in_use  app_db_pool_available) > 0.8
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database connection pool near saturation"
+          description: "Database connection pool utilization is above 80%."
       - alert: AuditIntegrityFailure
-        expr: audit_chain_valid == 0
+        expr: app_audit_chain_valid == 0
         for: 0m
         labels:
           severity: page
         annotations:
           summary: "Audit chain integrity check failed"
           description: "Tamper-evident audit event hash chain verification failed."
-
-      - alert: HighErrorRate5xx
-        expr: rate(app_http_server_request_count{status_class="5xx"}[5m]) > 0.05
-        for: 2m
+      - alert: MissingDispatcherHeartbeat
+        expr: app_pipeline_dispatcher_heartbeat == 0
+        for: 3m
         labels:
           severity: warning
         annotations:

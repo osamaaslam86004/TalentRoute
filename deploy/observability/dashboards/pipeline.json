@@ -3,7 +3,39 @@
   "panels": [
     {
       "title": "Outbox Pending & Dead",
-      "type": "timeseries"
+      "type": "timeseries",
+      "targets": [
+        { "expr": "app_outbox_pending" },
+        { "expr": "app_outbox_dead" }
+      ]
+    },
+    {
+      "title": "Redis Celery Queue Length",
+      "type": "stat",
+      "targets": [{ "expr": "app_pipeline_redis_queue_length" }]
+    },
+    {
+      "title": "Dispatcher Heartbeat Status",
+      "type": "stat",
+      "targets": [{ "expr": "app_pipeline_dispatcher_heartbeat" }]
+    },
+    {
+      "title": "Screening End-to-End Latency P95",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(app_screening_end_to_end_duration_bucket[1m]))"
+        }
+      ]
+    },
+    {
+      "title": "Outbox Dispatch Lag",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(app_outbox_dispatch_lag_bucket[1m]))"
+        }
+      ]
     }
   ]
 }

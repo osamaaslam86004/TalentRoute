@@ -3,7 +3,26 @@
   "panels": [
     {
       "title": "Audit Chain Validity",
-      "type": "stat"
+      "type": "stat",
+      "targets": [{ "expr": "app_audit_chain_valid" }]
+    },
+    {
+      "title": "Audit Events Recorded",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(app_pipeline_events{event_type=~\"audit.*\"}[1m]))"
+        }
+      ]
+    },
+    {
+      "title": "Audit Integrity Check Failures",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(app_pipeline_events{event_type=\"audit.integrity_failed\"})"
+        }
+      ]
     }
   ]
 }

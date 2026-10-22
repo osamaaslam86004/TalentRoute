@@ -23,6 +23,12 @@ _screening_duration: Any | None = None
 _queue_wait_duration: Any | None = None
 _end_to_end_duration: Any | None = None
 _outbox_dispatch_lag: Any | None = None
+_outbox_dead_gauge: Any | None = None
+_outbox_pending_gauge: Any | None = None
+_redis_queue_gauge: Any | None = None
+_dispatcher_heartbeat_gauge: Any | None = None
+_audit_chain_valid_gauge: Any | None = None
+
 _ALLOWED_AUTH_REASONS = frozenset(
     {"missing", "invalid", "forbidden", "jwks_unavailable"}
 )
@@ -68,6 +74,8 @@ def initialize_metrics(settings: Settings) -> None:
     global _provider, _request_counter, _request_duration, _auth_failure_counter, _rate_limit_counter
     global _pipeline_events, _screening_duration, _queue_wait_duration
     global _end_to_end_duration, _outbox_dispatch_lag
+    global _outbox_dead_gauge, _outbox_pending_gauge, _redis_queue_gauge, _dispatcher_heartbeat_gauge, _audit_chain_valid_gauge
+
     if not settings.otel_enabled:
         return
     with _lock:
@@ -140,6 +148,31 @@ def initialize_metrics(settings: Settings) -> None:
             "app.outbox.dispatch.lag",
             unit="s",
             description="Time from outbox enqueue to broker dispatch",
+        )
+        _outbox_dead_gauge = meter.create_gauge(
+            "app.outbox.dead",
+            unit="{event}",
+            description="Current dead-letter outbox count",
+        )
+        _outbox_pending_gauge = meter.create_gauge(
+            "app.outbox.pending",
+            unit="{event}",
+            description="Current pending outbox count",
+        )
+        _redis_queue_gauge = meter.create_gauge(
+            "app.pipeline.redis_queue_length",
+            unit="{message}",
+            description="Celery Redis queue length",
+        )
+        _dispatcher_heartbeat_gauge = meter.create_gauge(
+            "app.pipeline.dispatcher_heartbeat",
+            unit="{status}",
+            description="Dispatcher heartbeat status (1=alive, 0=dead)",
+        )
+        _audit_chain_valid_gauge = meter.create_gauge(
+            "app.audit.chain_valid",
+            unit="{status}",
+            description="Audit chain integrity status (1=valid, 0=invalid)",
         )
         _provider = provider
 
@@ -247,6 +280,25 @@ def record_outbox_dispatch_lag(seconds: float) -> None:
     _record_duration(_outbox_dispatch_lag, seconds)
 
 
+def record_pipeline_gauges(stats: dict[str, int | float], audit_valid: int = 1) -> None:
+    global _outbox_dead_gauge, _outbox_pending_gauge, _redis_queue_gauge, _dispatcher_heartbeat_gauge, _audit_chain_valid_gauge
+
+    try:
+        if _outbox_dead_gauge is not None:
+            _outbox_dead_gauge.set(float(stats.get("outbox_dead", 0)))
+        if _outbox_pending_gauge is not None:
+            _outbox_pending_gauge.set(float(stats.get("outbox_pending", 0)))
+        if _redis_queue_gauge is not None:
+            _redis_queue_gauge.set(float(stats.get("redis_celery_queue_length", 0)))
+        if _dispatcher_heartbeat_gauge is not None:
+            hb = stats.get("dispatcher_heartbeat_present", 1)
+            _dispatcher_heartbeat_gauge.set(float(hb))
+        if _audit_chain_valid_gauge is not None:
+            _audit_chain_valid_gauge.set(float(audit_valid))
+    except Exception as exc:
+        logger.debug("pipeline gauge update failed error_type=%s", type(exc).__name__)
+
+
 def flush_metrics(timeout_millis: int = 5000) -> bool:
     provider = _provider
     if provider is None:
@@ -262,6 +314,8 @@ def shutdown_metrics() -> None:
     global _provider, _request_counter, _request_duration, _auth_failure_counter, _rate_limit_counter
     global _pipeline_events, _screening_duration, _queue_wait_duration
     global _end_to_end_duration, _outbox_dispatch_lag
+    global _outbox_dead_gauge, _outbox_pending_gauge, _redis_queue_gauge, _dispatcher_heartbeat_gauge, _audit_chain_valid_gauge
+
     with _lock:
         provider = _provider
         _provider = None

@@ -90,6 +90,13 @@ def configure_celery_logging(**_: Any) -> None:
 @worker_process_init.connect(weak=False)
 def initialize_worker_telemetry(**_: Any) -> None:
     _setup_process("worker")
+    try:
+        import asyncio
+        from app.db.session import engine
+
+        asyncio.run(engine.dispose())
+    except Exception:
+        pass
 
 
 @beat_init.connect(weak=False)

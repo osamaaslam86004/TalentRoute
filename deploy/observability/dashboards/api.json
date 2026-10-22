@@ -5,6 +5,24 @@
       "title": "Request Count",
       "type": "timeseries",
       "targets": [{ "expr": "sum(rate(app_http_server_request_count[1m]))" }]
+    },
+    {
+      "title": "HTTP Request Duration P95",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(app_http_server_request_duration_bucket[1m]))"
+        }
+      ]
+    },
+    {
+      "title": "Error Rate by Status Class",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(app_http_server_request_count[1m])) by (status_class)"
+        }
+      ]
     }
   ]
 }

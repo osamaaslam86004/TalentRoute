@@ -6,7 +6,13 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
 from app.db.base import Base
-from app.db.models import AuditChainHead, AuditEvent, OutboxEvent, ReviewerFeedback, Screening  # noqa: F401 - register model metadata
+from app.db.models import (
+    AuditChainHead,
+    AuditEvent,
+    OutboxEvent,
+    ReviewerFeedback,
+    Screening,
+)
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
@@ -40,7 +46,9 @@ async def run_migrations_online() -> None:
 
 
 def do_run_migrations(connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+    context.configure(
+        connection=connection, target_metadata=target_metadata, compare_type=True
+    )
     with context.begin_transaction():
         context.run_migrations()
 
@@ -49,4 +57,5 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     import asyncio
+
     asyncio.run(run_migrations_online())
