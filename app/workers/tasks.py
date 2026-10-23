@@ -38,4 +38,11 @@ def screen_candidate(self, screening_id: str) -> dict[str, str]:
             type(exc).__name__,
         )
         raise
+    finally:
+        try:
+            from app.db.session import worker_engine
+
+            worker_engine.sync_engine.dispose()
+        except Exception:
+            pass
     return {"screening_id": screening_id, "status": "processed"}

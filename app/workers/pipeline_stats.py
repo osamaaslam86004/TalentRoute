@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, func, select
@@ -71,8 +70,8 @@ async def collect_pipeline_statistics() -> dict[str, int | float]:
 
     try:
         pool = engine.sync_engine.pool
-        stats["db_pool_in_use"] = pool.checkedout()
-        stats["db_pool_available"] = pool.checkedin()
+        stats["db_pool_in_use"] = getattr(pool, "checkedout", lambda: 0)()
+        stats["db_pool_available"] = getattr(pool, "checkedin", lambda: 0)()
 
     except Exception as exc:
         logger.warning(
@@ -107,4 +106,12 @@ def collect_stats_task() -> dict[str, int | float]:
     """Celery beat task wrapper for pipeline stats collection."""
     import asyncio
 
-    return asyncio.run(collect_pipeline_statistics())
+    try:
+        return asyncio.run(collect_pipeline_statistics())
+    finally:
+        try:
+            from app.db.session import worker_engine
+
+            worker_engine.sync_engine.dispose()
+        except Exception:
+            pass

@@ -10,12 +10,12 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import and_, or_, select, update
 
 from app.core.config import get_settings
+from app.core.rate_limit import get_rate_limit_redis_client
 from app.db.models.outbox_event import OutboxEvent
 from app.db.session import AsyncSessionLocal
 from app.observability.metrics import record_outbox_dispatch_lag, record_pipeline_event
 from app.observability.pipeline import traced_stage
 from app.observability.tracing import extract_trace_context
-from app.core.rate_limit import get_rate_limit_redis_client
 from app.workers.celery_app import celery_app
 from app.workers.tasks import screen_candidate
 from app.workers.telemetry import build_task_headers
@@ -230,5 +230,12 @@ async def _dispatch_once() -> dict[str, int]:
 @celery_app.task(name="app.workers.outbox.dispatch_pending_outbox", queue="outbox")
 def dispatch_pending_outbox() -> dict[str, int]:
     """Dispatch one bounded outbox batch. Celery Beat schedules this task."""
+    try:
+        return asyncio.run(_dispatch_once())
+    finally:
+        try:
+            from app.db.session import worker_engine
 
-    return asyncio.run(_dispatch_once())
+            worker_engine.sync_engine.dispose()
+        except Exception:
+            pass

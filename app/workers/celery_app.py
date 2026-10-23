@@ -37,4 +37,8 @@ celery_app.conf.update(
     },
 )
 
+from app.db.session import configure_worker_db
+
+configure_worker_db()
+
 import app.observability.celery_signals

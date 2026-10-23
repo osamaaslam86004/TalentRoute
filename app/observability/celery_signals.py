@@ -11,7 +11,6 @@ from typing import Any
 
 from celery.signals import (
     beat_init,
-    setup_logging as celery_setup_logging,
     task_failure,
     task_postrun,
     task_prerun,
@@ -19,6 +18,9 @@ from celery.signals import (
     worker_process_init,
     worker_process_shutdown,
     worker_shutdown,
+)
+from celery.signals import (
+    setup_logging as celery_setup_logging,
 )
 from opentelemetry import trace
 
@@ -91,10 +93,10 @@ def configure_celery_logging(**_: Any) -> None:
 def initialize_worker_telemetry(**_: Any) -> None:
     _setup_process("worker")
     try:
-        import asyncio
-        from app.db.session import engine
+        from app.db.session import configure_worker_db, worker_engine
 
-        asyncio.run(engine.dispose())
+        configure_worker_db()
+        worker_engine.sync_engine.dispose()
     except Exception:
         pass
 
@@ -102,6 +104,13 @@ def initialize_worker_telemetry(**_: Any) -> None:
 @beat_init.connect(weak=False)
 def initialize_beat_telemetry(**_: Any) -> None:
     _setup_process("beat")
+    try:
+        from app.db.session import configure_worker_db, worker_engine
+
+        configure_worker_db()
+        worker_engine.sync_engine.dispose()
+    except Exception:
+        pass
     atexit.register(_shutdown_process)
 
 
@@ -273,3 +282,15 @@ def finish_task_telemetry(
             span_manager.__exit__(None, None, None)
         finally:
             scope_manager.__exit__(None, None, None)
+
+
+@task_postrun.connect(weak=False)
+def cleanup_task_db_connections(**_: Any) -> None:
+    """Manage database connection lifetimes per task invocation to prevent asyncpg event loop binding errors."""
+    try:
+        from app.db.session import engine, worker_engine
+
+        worker_engine.sync_engine.dispose()
+        engine.sync_engine.dispose()
+    except Exception:
+        pass
