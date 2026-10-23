@@ -34,9 +34,7 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, bool], ...] = (
     ),
     (
         "labelled_name",
-        re.compile(
-            r"(?im)(\b(?:candidate|applicant|full\s+name|name)\s*:\s*)([^\n,;]{2,80})"
-        ),
+        re.compile(r"(?im)(\b(?:candidate|applicant|full\s+name|name)\s*:\s*)([^\n,;]{2,80})"),
         r"\1[REDACTED_NAME]",
         False,
     ),
@@ -80,9 +78,7 @@ _RULES: tuple[tuple[str, re.Pattern[str], str, bool], ...] = (
 )
 
 
-def redact_pii(
-    text: str, *, enabled: bool = True, policy: str = "baseline"
-) -> RedactionResult:
+def redact_pii(text: str, *, enabled: bool = True, policy: str = "baseline") -> RedactionResult:
     """Mask structured PII and expose aggregate counts only, never the matched values."""
 
     if not enabled:
@@ -95,7 +91,6 @@ def redact_pii(
     counts: dict[str, int] = {}
 
     for category, pattern, replacement, strict_only in _RULES:
-
         if strict_only and policy != "strict":
             continue
 

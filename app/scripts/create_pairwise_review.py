@@ -12,18 +12,12 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(description=__doc__)
 
-    parser.add_argument(
-        "--candidate-a", required=True, help="JSONL outputs for candidate A"
-    )
-    parser.add_argument(
-        "--candidate-b", required=True, help="JSONL outputs for candidate B"
-    )
+    parser.add_argument("--candidate-a", required=True, help="JSONL outputs for candidate A")
+    parser.add_argument("--candidate-b", required=True, help="JSONL outputs for candidate B")
     parser.add_argument("--candidate-a-version", required=True)
     parser.add_argument("--candidate-b-version", required=True)
     parser.add_argument("--public-output", default="reports/blinded-review.json")
-    parser.add_argument(
-        "--private-map-output", default=".private/blinded-review-map.json"
-    )
+    parser.add_argument("--private-map-output", default=".private/blinded-review-map.json")
     parser.add_argument("--seed", type=int)
     parser.add_argument(
         "--include-review-context",
@@ -42,17 +36,13 @@ def main() -> int:
         include_review_context=args.include_review_context,
     )
 
-    write_json(
-        args.public_output, {"review_version": "blinded-pairwise-v1", "tasks": public}
-    )
+    write_json(args.public_output, {"review_version": "blinded-pairwise-v1", "tasks": public})
 
     # Keep this file out of version control and accessible only to the evaluation owner.
     write_json(args.private_map_output, {"private_mapping": private})
 
     Path(args.private_map_output).chmod(0o600)
-    print(
-        f"Created {len(public)} blinded tasks. Keep the private mapping separate from reviewers."
-    )
+    print(f"Created {len(public)} blinded tasks. Keep the private mapping separate from reviewers.")
 
     return 0
 

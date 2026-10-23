@@ -46,9 +46,7 @@ class Principal:
 
 _PERMISSION_ROLES: dict[str, frozenset[str]] = {
     "screening:write": frozenset({"recruiter", "service"}),
-    "screening:read": frozenset(
-        {"recruiter", "reviewer", "auditor", "privacy_officer"}
-    ),
+    "screening:read": frozenset({"recruiter", "reviewer", "auditor", "privacy_officer"}),
     "screening:delete": frozenset({"privacy_officer"}),
     "review:write": frozenset({"reviewer"}),
     "review:read": frozenset({"reviewer", "auditor"}),
@@ -98,17 +96,13 @@ def _bind_principal(request: Request, principal: Principal, settings: Settings) 
 def _decode_oidc_token(token: str, settings: Settings) -> Principal:
     if not (settings.oidc_issuer and settings.oidc_audience and settings.oidc_jwks_url):
         record_auth_failure("jwks_unavailable")
-        raise HTTPException(
-            status_code=503, detail="OIDC authentication is not configured"
-        )
+        raise HTTPException(status_code=503, detail="OIDC authentication is not configured")
 
     if len(token) > 32768:
         raise _unauthorized("Invalid access token")
 
     try:
-        signing_key = _jwks_client(settings.oidc_jwks_url).get_signing_key_from_jwt(
-            token
-        )
+        signing_key = _jwks_client(settings.oidc_jwks_url).get_signing_key_from_jwt(token)
 
         claims = jwt.decode(
             token,
@@ -139,26 +133,16 @@ def _decode_oidc_token(token: str, settings: Settings) -> Principal:
     if not isinstance(subject, str) or not subject.strip():
         raise _unauthorized("Access token has no subject")
 
-    if settings.oidc_require_tenant_claim and (
-        not isinstance(tenant, str) or not tenant.strip()
-    ):
+    if settings.oidc_require_tenant_claim and (not isinstance(tenant, str) or not tenant.strip()):
         record_auth_failure("forbidden")
-        raise HTTPException(
-            status_code=403, detail="Access token is missing the tenant claim"
-        )
+        raise HTTPException(status_code=403, detail="Access token is missing the tenant claim")
 
-    if tenant and (
-        len(str(tenant)) > 128 or any(ord(char) < 32 for char in str(tenant))
-    ):
+    if tenant and (len(str(tenant)) > 128 or any(ord(char) < 32 for char in str(tenant))):
         record_auth_failure("forbidden")
-        raise HTTPException(
-            status_code=403, detail="Access token has an invalid tenant claim"
-        )
+        raise HTTPException(status_code=403, detail="Access token has an invalid tenant claim")
 
     roles = _claim_strings(claims.get(settings.oidc_roles_claim))
-    raw_scopes = claims.get(
-        settings.oidc_scopes_claim, claims.get("scp", claims.get("scope", ""))
-    )
+    raw_scopes = claims.get(settings.oidc_scopes_claim, claims.get("scp", claims.get("scope", "")))
     scopes = _claim_strings(raw_scopes)
 
     # Normalize common plural claim spellings without weakening action-level permissions.
@@ -168,9 +152,7 @@ def _decode_oidc_token(token: str, settings: Settings) -> Principal:
         "screenings:delete": "screening:delete",
     }
 
-    scopes = frozenset(
-        scopes.union(aliases[item] for item in scopes if item in aliases)
-    )
+    scopes = frozenset(scopes.union(aliases[item] for item in scopes if item in aliases))
 
     return Principal(
         subject=subject,
@@ -190,9 +172,7 @@ async def get_principal(
     settings = get_settings()
 
     if settings.auth_mode in {"auto", "oidc"} and bearer is not None:
-        principal = await asyncio.to_thread(
-            _decode_oidc_token, bearer.credentials, settings
-        )
+        principal = await asyncio.to_thread(_decode_oidc_token, bearer.credentials, settings)
         _bind_principal(request, principal, settings)
         return principal
     if settings.auth_mode == "oidc":

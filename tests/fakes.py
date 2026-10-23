@@ -19,7 +19,9 @@ class FakeAssessmentProvider:
             rationale="Based on explicit work history in the text.",
         )
 
-    async def assess_skills(self, application_text: str, job_title: str, required_skills: list[str]) -> SkillsAssessment:
+    async def assess_skills(
+        self, application_text: str, job_title: str, required_skills: list[str]
+    ) -> SkillsAssessment:
         return SkillsAssessment(
             match=self.match,
             confidence=0.75,

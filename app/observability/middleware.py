@@ -33,11 +33,7 @@ _STANDARD_METHODS = frozenset(
 
 def _request_id(headers: list[tuple[bytes, bytes]]) -> str:
     supplied = next(
-        (
-            value.decode("latin-1")
-            for key, value in headers
-            if key.lower() == b"x-request-id"
-        ),
+        (value.decode("latin-1") for key, value in headers if key.lower() == b"x-request-id"),
         None,
     )
     try:
@@ -66,9 +62,7 @@ class RequestTelemetryMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    async def __call__(
-        self, scope: dict[str, Any], receive: ASGIReceive, send: ASGISend
-    ) -> None:
+    async def __call__(self, scope: dict[str, Any], receive: ASGIReceive, send: ASGISend) -> None:
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return
@@ -127,9 +121,7 @@ class RequestTelemetryMiddleware:
                     "route": route,
                     "status_code": response_status,
                     "duration_ms": round(duration_seconds * 1000, 3),
-                    "outcome": (
-                        "error" if failed or response_status >= 500 else "success"
-                    ),
+                    "outcome": ("error" if failed or response_status >= 500 else "success"),
                 }
                 if failed:
                     extra["error_type"] = error_type

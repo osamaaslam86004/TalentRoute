@@ -239,7 +239,9 @@ def exception_type_name(exc: BaseException | type[BaseException]) -> str:
     """Class name, module-qualified outside builtins. Never includes the exception message."""
 
     cls = exc if isinstance(exc, type) else type(exc)
-    name = cls.__qualname__ if cls.__module__ == "builtins" else f"{cls.__module__}.{cls.__qualname__}"
+    name = (
+        cls.__qualname__ if cls.__module__ == "builtins" else f"{cls.__module__}.{cls.__qualname__}"
+    )
     return name[:120]
 
 

@@ -1,10 +1,8 @@
 import logging
 
 from fastapi import APIRouter, Response, status
-from redis.asyncio import from_url
 from sqlalchemy import text
 
-from app.core.config import get_settings
 from app.core.rate_limit import get_rate_limit_redis_client
 from app.db.session import engine
 

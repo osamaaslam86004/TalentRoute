@@ -26,9 +26,7 @@ def instrument_api(app: Any, engine: Any, settings: Settings) -> None:
     from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 
     FastAPIInstrumentor.instrument_app(app, excluded_urls=r".*/health/(live|ready)$")
-    SQLAlchemyInstrumentor().instrument(
-        engine=engine.sync_engine, enable_commenter=False
-    )
+    SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine, enable_commenter=False)
     RedisInstrumentor().instrument()
     HTTPXClientInstrumentor().instrument()
     _INSTRUMENTED_APPS.add(id(app))

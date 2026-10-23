@@ -22,9 +22,9 @@ async def test_match_routes_to_hr_review_and_requires_human():
 
 @pytest.mark.asyncio
 async def test_senior_candidate_without_skill_match_routes_to_recruiter_review():
-    graph = create_screening_graph(FakeAssessmentProvider(
-        level=ExperienceLevel.SENIOR_LEVEL, match=SkillMatch.PARTIAL_MATCH
-    ))
+    graph = create_screening_graph(
+        FakeAssessmentProvider(level=ExperienceLevel.SENIOR_LEVEL, match=SkillMatch.PARTIAL_MATCH)
+    )
     result = await graph.ainvoke(BASE_STATE)
     assert result["recommendation"] == Recommendation.RECRUITER_REVIEW
     assert result["human_review_required"] is True

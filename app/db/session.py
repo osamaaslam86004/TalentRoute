@@ -32,9 +32,7 @@ engine = create_async_engine(
 
 register_db_pool_listeners(engine)
 
-AsyncSessionLocal = async_sessionmaker(
-    engine, class_=AsyncSession, expire_on_commit=False
-)
+AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 worker_engine = create_worker_engine()
 WorkerAsyncSessionLocal = async_sessionmaker(

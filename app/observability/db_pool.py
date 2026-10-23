@@ -7,8 +7,6 @@ import time
 
 from sqlalchemy import event
 
-from app.observability.metrics import _record_duration
-
 logger = logging.getLogger(__name__)
 
 

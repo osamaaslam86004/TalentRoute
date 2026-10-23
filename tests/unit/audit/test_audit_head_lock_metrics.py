@@ -23,9 +23,7 @@ def test_record_audit_head_lock_duration_noop_when_disabled():
 
 def test_record_audit_head_lock_duration_records_histogram(make_settings):
     shutdown_metrics()
-    settings = make_settings(
-        otel_enabled=True, otel_exporter_otlp_endpoint="http://localhost:4318"
-    )
+    settings = make_settings(otel_enabled=True, otel_exporter_otlp_endpoint="http://localhost:4318")
     initialize_metrics(settings)
     try:
         assert metrics._audit_head_lock_duration is not None
@@ -93,9 +91,7 @@ async def test_verify_audit_chain_records_lock_duration():
     mock_session.execute = AsyncMock()
     mock_head = MagicMock(last_sequence=0, last_hash=GENESIS_HASH)
     mock_session.scalar = AsyncMock(return_value=mock_head)
-    mock_session.scalars = AsyncMock(
-        return_value=MagicMock(all=MagicMock(return_value=[]))
-    )
+    mock_session.scalars = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
     mock_session.begin_nested = MagicMock()
     mock_session.begin_nested.return_value.__aenter__ = AsyncMock()
     mock_session.begin_nested.return_value.__aexit__ = AsyncMock()

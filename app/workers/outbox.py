@@ -41,9 +41,7 @@ async def _claim_batch(limit: int) -> list[tuple[str, str, str, dict, int]]:
                     OutboxEvent.locked_at < stale_before,
                 ),
             )
-            .values(
-                status="dead", locked_at=None, last_error_code="dispatch_lease_expired"
-            )
+            .values(status="dead", locked_at=None, last_error_code="dispatch_lease_expired")
         )
         expired_count = max(0, int(expired_result.rowcount or 0))
         if expired_count:
@@ -186,18 +184,14 @@ async def _dispatch_once_inner() -> dict[str, int]:
                     queued_at = parsed if parsed.tzinfo is not None else None
                 except ValueError:
                     queued_at = None
-            headers = build_task_headers(
-                payload, tenant_id=tenant_id, event_id=event_id
-            )
+            headers = build_task_headers(payload, tenant_id=tenant_id, event_id=event_id)
 
             with traced_stage(
                 "outbox.dispatch",
                 screening_id=screening_id,
                 context=extract_trace_context(payload),
             ):
-                screen_candidate.apply_async(
-                    args=[screening_id], task_id=event_id, headers=headers
-                )
+                screen_candidate.apply_async(args=[screening_id], task_id=event_id, headers=headers)
 
             if queued_at is not None:
                 record_outbox_dispatch_lag(

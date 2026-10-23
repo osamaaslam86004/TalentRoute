@@ -12,9 +12,7 @@ from app.workflows.screening.prompts import (
 
 
 class AssessmentProvider(Protocol):
-    async def assess_experience(
-        self, application_text: str
-    ) -> ExperienceAssessment: ...
+    async def assess_experience(self, application_text: str) -> ExperienceAssessment: ...
 
     async def assess_skills(
         self, application_text: str, job_title: str, required_skills: list[str]
@@ -28,11 +26,7 @@ class OpenAIAssessmentProvider:
 
         settings = get_settings()
 
-        api_key = (
-            settings.openai_api_key.get_secret_value()
-            if settings.openai_api_key
-            else None
-        )
+        api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else None
         if not api_key:
             raise RuntimeError("LLM provider is not configured")
 

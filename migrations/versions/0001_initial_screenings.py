@@ -4,6 +4,7 @@ Revision ID: 0001_initial
 Revises:
 Create Date: 2026-10-10
 """
+
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
@@ -34,8 +35,12 @@ def upgrade() -> None:
         sa.Column("human_review_required", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("error_code", sa.String(length=64), nullable=True),
         sa.Column("attempt_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.Column("processed_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index("ix_screenings_status_created_at", "screenings", ["status", "created_at"])

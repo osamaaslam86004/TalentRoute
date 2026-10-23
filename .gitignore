@@ -21,3 +21,5 @@ reports/*.json
 datasets/
 local/
 .github/context-mode/sessions/
+GEMINI
+GEMINI.md

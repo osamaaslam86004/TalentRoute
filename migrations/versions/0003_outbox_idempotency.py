@@ -3,6 +3,7 @@
 Revision ID: 0003_outbox_idempotency
 Revises: 0002_enterprise
 """
+
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
@@ -15,8 +16,12 @@ depends_on = None
 
 def upgrade() -> None:
     op.add_column("screenings", sa.Column("idempotency_key", sa.String(length=128), nullable=True))
-    op.add_column("screenings", sa.Column("request_fingerprint", sa.String(length=64), nullable=True))
-    op.add_column("screenings", sa.Column("processing_started_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column(
+        "screenings", sa.Column("request_fingerprint", sa.String(length=64), nullable=True)
+    )
+    op.add_column(
+        "screenings", sa.Column("processing_started_at", sa.DateTime(timezone=True), nullable=True)
+    )
     op.create_index(
         "uq_screenings_tenant_idempotency",
         "screenings",
@@ -34,16 +39,24 @@ def upgrade() -> None:
         sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("status", sa.String(length=20), nullable=False, server_default="pending"),
         sa.Column("attempt_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("available_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "available_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("locked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("dispatched_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_error_code", sa.String(length=80), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
     op.create_index("ix_outbox_events_tenant_id", "outbox_events", ["tenant_id"])
     op.create_index("ix_outbox_events_status", "outbox_events", ["status"])
-    op.create_index("ix_outbox_events_status_available", "outbox_events", ["status", "available_at"])
+    op.create_index(
+        "ix_outbox_events_status_available", "outbox_events", ["status", "available_at"]
+    )
     op.create_index("ix_outbox_events_tenant_created", "outbox_events", ["tenant_id", "created_at"])
 
 

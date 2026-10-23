@@ -10,8 +10,8 @@ from typing import Literal
 
 from app.core.config import Settings, get_settings
 from app.observability.logging import configure_logging
-from app.observability.policy import enforce_langsmith_policy
 from app.observability.metrics import shutdown_metrics
+from app.observability.policy import enforce_langsmith_policy
 from app.observability.tracing import shutdown_tracing
 
 Role = Literal["api", "worker", "beat", "cli"]

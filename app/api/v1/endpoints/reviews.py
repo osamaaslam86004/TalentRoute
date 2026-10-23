@@ -39,9 +39,7 @@ async def submit_feedback(
     session: AsyncSession = Depends(get_db_session),
 ) -> ReviewerFeedbackRead:
 
-    screening = await get_screening(
-        session, screening_id, tenant_id=principal.tenant_id
-    )
+    screening = await get_screening(session, screening_id, tenant_id=principal.tenant_id)
 
     if screening is None:
         raise HTTPException(status_code=404, detail="Screening not found")
@@ -88,9 +86,7 @@ async def list_feedback(
     principal: Principal = Depends(require_permission("review:read")),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[ReviewerFeedbackRead]:
-    screening = await get_screening(
-        session, screening_id, tenant_id=principal.tenant_id
-    )
+    screening = await get_screening(session, screening_id, tenant_id=principal.tenant_id)
 
     if screening is None:
         raise HTTPException(status_code=404, detail="Screening not found")

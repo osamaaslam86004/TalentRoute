@@ -40,7 +40,6 @@ def load_jsonl(path: str | Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
 
     with Path(path).open("r", encoding="utf-8") as handle:
-
         for line_number, line in enumerate(handle, start=1):
             if not line.strip():
                 continue
@@ -50,9 +49,7 @@ def load_jsonl(path: str | Path) -> list[dict[str, Any]]:
                 raise ValueError(f"Invalid JSONL at {path}:{line_number}") from exc
 
             if not isinstance(row, dict):
-                raise ValueError(
-                    f"Each JSONL record must be an object: {path}:{line_number}"
-                )
+                raise ValueError(f"Each JSONL record must be an object: {path}:{line_number}")
 
             rows.append(row)
 
@@ -143,8 +140,7 @@ def _accuracy(
 ) -> dict[str, Any]:
 
     comparisons = [
-        prediction.get(field) == gold.get("gold", {}).get(field)
-        for gold, prediction in records
+        prediction.get(field) == gold.get("gold", {}).get(field) for gold, prediction in records
     ]
     successes = sum(comparisons)
 
@@ -199,7 +195,6 @@ def _calibration_summary(
         )
 
     if not points:
-
         return {
             "sample_count": 0,
             "mean_confidence": None,
@@ -218,8 +213,7 @@ def _calibration_summary(
         values = [
             (confidence, correct)
             for confidence, correct in points
-            if lower <= confidence < upper
-            or (bin_index == bins_count - 1 and confidence == 1)
+            if lower <= confidence < upper or (bin_index == bins_count - 1 and confidence == 1)
         ]
 
         if not values:
@@ -318,30 +312,19 @@ def evaluate_predictions(
 
         if not isinstance(skills_evidence, list):
             skills_evidence = []
-        coverage = _grounding_coverage(
-            source_text, experience_evidence + skills_evidence
-        )
+        coverage = _grounding_coverage(source_text, experience_evidence + skills_evidence)
 
         if coverage is not None:
             raw_grounding.append(coverage)
 
         try:
             if raw.get("latency_ms", pred.get("latency_ms")) is not None:
-                latency.append(
-                    max(0.0, float(raw.get("latency_ms", pred.get("latency_ms"))))
-                )
-            if (
-                raw.get("estimated_cost_usd", pred.get("estimated_cost_usd"))
-                is not None
-            ):
+                latency.append(max(0.0, float(raw.get("latency_ms", pred.get("latency_ms")))))
+            if raw.get("estimated_cost_usd", pred.get("estimated_cost_usd")) is not None:
                 cost.append(
                     max(
                         0.0,
-                        float(
-                            raw.get(
-                                "estimated_cost_usd", pred.get("estimated_cost_usd")
-                            )
-                        ),
+                        float(raw.get("estimated_cost_usd", pred.get("estimated_cost_usd"))),
                     )
                 )
 
@@ -358,9 +341,7 @@ def evaluate_predictions(
         if isinstance(pv, str) and pv:
             all_prompts.add(pv)
 
-        human_review = raw.get(
-            "human_review_assessment", pred.get("human_review_assessment")
-        )
+        human_review = raw.get("human_review_assessment", pred.get("human_review_assessment"))
 
         if isinstance(human_review, dict):
             for field in ("experience_level", "skills_match", "recommendation"):
@@ -380,9 +361,7 @@ def evaluate_predictions(
         field: _accuracy(records, field, iterations=bootstrap_iterations)
         for field in ("experience_level", "skills_match", "recommendation")
     }
-    slice_groups: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = defaultdict(
-        list
-    )
+    slice_groups: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = defaultdict(list)
 
     for record in records:
         item = record[0]
@@ -395,9 +374,9 @@ def evaluate_predictions(
             "experience_accuracy": _accuracy(
                 group, "experience_level", iterations=bootstrap_iterations
             )["accuracy"],
-            "skills_accuracy": _accuracy(
-                group, "skills_match", iterations=bootstrap_iterations
-            )["accuracy"],
+            "skills_accuracy": _accuracy(group, "skills_match", iterations=bootstrap_iterations)[
+                "accuracy"
+            ],
             "recommendation_accuracy": _accuracy(
                 group, "recommendation", iterations=bootstrap_iterations
             )["accuracy"],
@@ -407,11 +386,7 @@ def evaluate_predictions(
 
     prediction_distributions = {
         field: dict(
-            sorted(
-                Counter(
-                    str(pred.get(field, "<missing>")) for _, pred in records
-                ).items()
-            )
+            sorted(Counter(str(pred.get(field, "<missing>")) for _, pred in records).items())
         )
         for field in ("experience_level", "skills_match", "recommendation")
     }
@@ -443,9 +418,7 @@ def evaluate_predictions(
         "mean_latency_ms": round(fmean(latency), 2) if latency else None,
         "p95_latency_ms": (
             round(
-                sorted(latency)[
-                    min(len(latency) - 1, math.ceil(0.95 * len(latency)) - 1)
-                ],
+                sorted(latency)[min(len(latency) - 1, math.ceil(0.95 * len(latency)) - 1)],
                 2,
             )
             if latency
@@ -454,19 +427,13 @@ def evaluate_predictions(
         "total_estimated_cost_usd": round(sum(cost), 6) if cost else None,
         "mean_estimated_cost_usd": round(fmean(cost), 6) if cost else None,
         "human_gold_vs_llm_judge_agreement": (
-            round(sum(human_judge_match) / len(human_judge_match), 4)
-            if human_judge_match
-            else None
+            round(sum(human_judge_match) / len(human_judge_match), 4) if human_judge_match else None
         ),
         "model_vs_llm_judge_agreement": (
-            round(sum(model_judge_match) / len(model_judge_match), 4)
-            if model_judge_match
-            else None
+            round(sum(model_judge_match) / len(model_judge_match), 4) if model_judge_match else None
         ),
         "human_review_vs_model_agreement": (
-            round(sum(human_model_match) / len(human_model_match), 4)
-            if human_model_match
-            else None
+            round(sum(human_model_match) / len(human_model_match), 4) if human_model_match else None
         ),
         "confidence_calibration": calibration,
     }
@@ -532,9 +499,7 @@ def compare_reports(
 
     if isinstance(base_schema, (int, float)) and isinstance(new_schema, (int, float)):
         if new_schema < base_schema - max_schema_drop:
-            failures.append(
-                f"schema validity regressed from {base_schema:.3f} to {new_schema:.3f}"
-            )
+            failures.append(f"schema validity regressed from {base_schema:.3f} to {new_schema:.3f}")
 
     for key in ("experience_accuracy", "skills_accuracy", "recommendation_accuracy"):
         before = base_metrics.get(key, {}).get("accuracy")
@@ -552,13 +517,10 @@ def compare_reports(
         values = [
             item.get(field)
             for item in slices.values()
-            if isinstance(item.get(field), (int, float))
-            and item.get("sample_count", 0) >= 2
+            if isinstance(item.get(field), (int, float)) and item.get("sample_count", 0) >= 2
         ]
         if len(values) >= 2 and max(values) - min(values) > max_slice_accuracy_gap:
-            failures.append(
-                f"candidate slice gap for {field} exceeds {max_slice_accuracy_gap:.3f}"
-            )
+            failures.append(f"candidate slice gap for {field} exceeds {max_slice_accuracy_gap:.3f}")
 
     distribution_shift: dict[str, float] = {}
     base_distributions = baseline.get("prediction_distributions", {})
@@ -573,10 +535,7 @@ def compare_reports(
         if total_before and total_after:
             labels = set(before).union(after)
             distance = 0.5 * sum(
-                abs(
-                    before.get(label, 0) / total_before
-                    - after.get(label, 0) / total_after
-                )
+                abs(before.get(label, 0) / total_before - after.get(label, 0) / total_after)
                 for label in labels
             )
             distribution_shift[field] = round(distance, 4)
@@ -592,16 +551,10 @@ def compare_reports(
         before = base_metrics.get(metric_key)
         after = new_metrics.get(metric_key)
 
-        if (
-            isinstance(before, (int, float))
-            and before > 0
-            and isinstance(after, (int, float))
-        ):
+        if isinstance(before, (int, float)) and before > 0 and isinstance(after, (int, float)):
             increase = (after - before) / before
             if increase > threshold:
-                failures.append(
-                    f"{label} increased by {increase:.1%}, above {threshold:.1%}"
-                )
+                failures.append(f"{label} increased by {increase:.1%}, above {threshold:.1%}")
 
     return {
         "gate_version": "screening-release-gate-v1",

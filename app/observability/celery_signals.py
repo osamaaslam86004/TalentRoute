@@ -58,9 +58,7 @@ def _get_headers(task: Any) -> dict[str, str]:
         return {}
 
     return {
-        key: value
-        for key, value in raw.items()
-        if isinstance(key, str) and isinstance(value, str)
+        key: value for key, value in raw.items() if isinstance(key, str) and isinstance(value, str)
     }
 
 
@@ -143,9 +141,7 @@ def start_task_telemetry(
     if sender is None:
         return
 
-    request_id = str(
-        task_id or getattr(getattr(sender, "request", None), "id", "unknown")
-    )[:128]
+    request_id = str(task_id or getattr(getattr(sender, "request", None), "id", "unknown"))[:128]
 
     headers = _get_headers(sender)
     screening_id = None
@@ -166,9 +162,7 @@ def start_task_telemetry(
     )
 
     scope_manager.__enter__()
-    parent_context = extract_trace_context(
-        {"traceparent": headers.get("traceparent", "")}
-    )
+    parent_context = extract_trace_context({"traceparent": headers.get("traceparent", "")})
 
     tracer = trace.get_tracer("app.workers.celery")
     span_manager = tracer.start_as_current_span(
@@ -179,11 +173,7 @@ def start_task_telemetry(
             "celery.task.id": request_id,
             "app.stage": "celery",
             **({"app.screening_id": screening_id} if screening_id else {}),
-            **(
-                {"app.tenant_id": headers["tenant_id"][:128]}
-                if headers.get("tenant_id")
-                else {}
-            ),
+            **({"app.tenant_id": headers["tenant_id"][:128]} if headers.get("tenant_id") else {}),
         },
     )
 
@@ -206,8 +196,7 @@ def start_task_telemetry(
 def record_task_retry(sender: Any = None, request: Any = None, **_: Any) -> None:
 
     task_id = str(
-        getattr(request, "id", None)
-        or getattr(getattr(sender, "request", None), "id", "unknown")
+        getattr(request, "id", None) or getattr(getattr(sender, "request", None), "id", "unknown")
     )[:128]
 
     with _lock:
@@ -248,9 +237,7 @@ def record_task_failure(
 
 
 @task_postrun.connect(weak=False)
-def finish_task_telemetry(
-    task_id: str | None = None, state: str | None = None, **_: Any
-) -> None:
+def finish_task_telemetry(task_id: str | None = None, state: str | None = None, **_: Any) -> None:
 
     key = str(task_id or "unknown")[:128]
 
@@ -268,9 +255,7 @@ def finish_task_telemetry(
     try:
         span = trace.get_current_span()
         span.set_attribute("app.outcome", normalized)
-        record_pipeline_event(
-            "celery.task.completed", outcome=normalized, stage="celery"
-        )
+        record_pipeline_event("celery.task.completed", outcome=normalized, stage="celery")
         if task_name == "app.workers.tasks.screen_candidate":
             record_screening_duration(elapsed, normalized)
             if enqueued_at is not None and normalized in {"success", "failure"}:

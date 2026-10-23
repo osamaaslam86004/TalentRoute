@@ -20,7 +20,10 @@ def test_request_normalizes_and_deduplicates_skills():
 
 def test_request_rejects_blank_skill_set():
     with pytest.raises(ValidationError):
-        ScreeningCreateRequest(application_text="More than twenty characters of sample text", required_skills=[" "])
+        ScreeningCreateRequest(
+            application_text="More than twenty characters of sample text",
+            required_skills=[" "],
+        )
 
 
 def test_assessment_confidence_is_bounded():

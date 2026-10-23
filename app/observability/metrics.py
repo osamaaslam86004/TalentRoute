@@ -32,9 +32,7 @@ _db_pool_in_use_gauge: Any | None = None
 _db_pool_available_gauge: Any | None = None
 _audit_head_lock_duration: Any | None = None
 
-_ALLOWED_AUTH_REASONS = frozenset(
-    {"missing", "invalid", "forbidden", "jwks_unavailable"}
-)
+_ALLOWED_AUTH_REASONS = frozenset({"missing", "invalid", "forbidden", "jwks_unavailable"})
 _ALLOWED_RATE_DECISIONS = frozenset(
     {"allowed", "limited", "backend_error_closed", "backend_error_open"}
 )
@@ -58,9 +56,7 @@ _PIPELINE_EVENT_TYPES = frozenset(
 _PIPELINE_OUTCOMES = frozenset(
     {"success", "failure", "retry", "dead", "duplicate", "reclaimed", "unknown"}
 )
-_PIPELINE_STAGES = frozenset(
-    {"outbox", "celery", "claim", "redact", "graph", "persist", "unknown"}
-)
+_PIPELINE_STAGES = frozenset({"outbox", "celery", "claim", "redact", "graph", "persist", "unknown"})
 
 
 def _signal_endpoint(settings: Settings, signal: str) -> str:
@@ -74,10 +70,20 @@ def _signal_endpoint(settings: Settings, signal: str) -> str:
 
 def initialize_metrics(settings: Settings) -> None:
     """Create an asynchronous OTLP metric reader once per process when telemetry is enabled."""
-    global _provider, _request_counter, _request_duration, _auth_failure_counter, _rate_limit_counter
+    global \
+        _provider, \
+        _request_counter, \
+        _request_duration, \
+        _auth_failure_counter, \
+        _rate_limit_counter
     global _pipeline_events, _screening_duration, _queue_wait_duration
     global _end_to_end_duration, _outbox_dispatch_lag
-    global _outbox_dead_gauge, _outbox_pending_gauge, _redis_queue_gauge, _dispatcher_heartbeat_gauge, _audit_chain_valid_gauge
+    global \
+        _outbox_dead_gauge, \
+        _outbox_pending_gauge, \
+        _redis_queue_gauge, \
+        _dispatcher_heartbeat_gauge, \
+        _audit_chain_valid_gauge
     global _db_pool_available_gauge, _db_pool_in_use_gauge, _audit_head_lock_duration
 
     if not settings.otel_enabled:
@@ -99,9 +105,7 @@ def initialize_metrics(settings: Settings) -> None:
                 "deployment.environment.name": settings.environment,
             }
         )
-        exporter = OTLPMetricExporter(
-            endpoint=_signal_endpoint(settings, "metrics"), timeout=5
-        )
+        exporter = OTLPMetricExporter(endpoint=_signal_endpoint(settings, "metrics"), timeout=5)
         reader = PeriodicExportingMetricReader(
             exporter, export_interval_millis=5000, export_timeout_millis=5000
         )
@@ -228,9 +232,7 @@ def record_auth_failure(reason: str) -> None:
 
 
 def record_rate_limit_decision(decision: str) -> None:
-    normalized = (
-        decision if decision in _ALLOWED_RATE_DECISIONS else "backend_error_closed"
-    )
+    normalized = decision if decision in _ALLOWED_RATE_DECISIONS else "backend_error_closed"
     attributes = sanitize_metric_labels({"decision": normalized})
     _safe_add(_rate_limit_counter, 1, attributes)
 
@@ -245,9 +247,7 @@ def record_pipeline_event(
     value: int = 1,
 ) -> None:
     """Record a pipeline event using fixed vocabularies and low-cardinality labels only."""
-    normalized_event = (
-        event_type if event_type in _PIPELINE_EVENT_TYPES else "pipeline.other"
-    )
+    normalized_event = event_type if event_type in _PIPELINE_EVENT_TYPES else "pipeline.other"
     normalized_outcome = outcome if outcome in _PIPELINE_OUTCOMES else "unknown"
     normalized_stage = stage if stage in _PIPELINE_STAGES else "unknown"
     attributes = sanitize_metric_labels(
@@ -279,12 +279,8 @@ def _record_duration(
 
 
 def record_screening_duration(seconds: float, outcome: str) -> None:
-    normalized = (
-        outcome if outcome in {"success", "failure", "retry", "unknown"} else "unknown"
-    )
-    _record_duration(
-        _screening_duration, seconds, sanitize_metric_labels({"outcome": normalized})
-    )
+    normalized = outcome if outcome in {"success", "failure", "retry", "unknown"} else "unknown"
+    _record_duration(_screening_duration, seconds, sanitize_metric_labels({"outcome": normalized}))
 
 
 def record_queue_wait(seconds: float) -> None:
@@ -300,9 +296,7 @@ def record_outbox_dispatch_lag(seconds: float) -> None:
 
 
 def record_audit_head_lock_duration(seconds: float, outcome: str = "success") -> None:
-    normalized = (
-        outcome if outcome in {"success", "failure", "timeout", "unknown"} else "unknown"
-    )
+    normalized = outcome if outcome in {"success", "failure", "timeout", "unknown"} else "unknown"
     _record_duration(
         _audit_head_lock_duration,
         seconds,
@@ -311,7 +305,12 @@ def record_audit_head_lock_duration(seconds: float, outcome: str = "success") ->
 
 
 def record_pipeline_gauges(stats: dict[str, int | float], audit_valid: int = 1) -> None:
-    global _outbox_dead_gauge, _outbox_pending_gauge, _redis_queue_gauge, _dispatcher_heartbeat_gauge, _audit_chain_valid_gauge
+    global \
+        _outbox_dead_gauge, \
+        _outbox_pending_gauge, \
+        _redis_queue_gauge, \
+        _dispatcher_heartbeat_gauge, \
+        _audit_chain_valid_gauge
     global _db_pool_in_use_gauge, _db_pool_available_gauge
 
     try:
@@ -346,10 +345,20 @@ def flush_metrics(timeout_millis: int = 5000) -> bool:
 
 
 def shutdown_metrics() -> None:
-    global _provider, _request_counter, _request_duration, _auth_failure_counter, _rate_limit_counter
+    global \
+        _provider, \
+        _request_counter, \
+        _request_duration, \
+        _auth_failure_counter, \
+        _rate_limit_counter
     global _pipeline_events, _screening_duration, _queue_wait_duration
     global _end_to_end_duration, _outbox_dispatch_lag
-    global _outbox_dead_gauge, _outbox_pending_gauge, _redis_queue_gauge, _dispatcher_heartbeat_gauge, _audit_chain_valid_gauge
+    global \
+        _outbox_dead_gauge, \
+        _outbox_pending_gauge, \
+        _redis_queue_gauge, \
+        _dispatcher_heartbeat_gauge, \
+        _audit_chain_valid_gauge
 
     with _lock:
         provider = _provider

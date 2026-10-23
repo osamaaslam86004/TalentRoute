@@ -1,7 +1,11 @@
 from celery import Celery
 
 from app.core.config import get_settings
+from app.db.session import configure_worker_db
 from app.observability.policy import enforce_langsmith_policy
+
+configure_worker_db()
+
 
 settings = get_settings()
 # Worker and beat both import this module; refuse to start with third-party LLM tracing enabled.
@@ -36,9 +40,3 @@ celery_app.conf.update(
         },
     },
 )
-
-from app.db.session import configure_worker_db
-
-configure_worker_db()
-
-import app.observability.celery_signals

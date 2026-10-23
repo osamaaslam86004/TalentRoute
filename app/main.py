@@ -1,4 +1,3 @@
-import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -14,8 +13,8 @@ from app.observability.instrumentation import instrument_api, uninstrument_api
 from app.observability.metrics import (
     flush_metrics,
     initialize_metrics,
-    shutdown_metrics,
     record_http_request,
+    shutdown_metrics,
 )
 from app.observability.middleware import RequestTelemetryMiddleware
 from app.observability.tracing import (

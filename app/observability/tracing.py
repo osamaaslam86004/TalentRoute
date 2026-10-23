@@ -36,9 +36,7 @@ def _signal_endpoint(settings: Settings, signal: str) -> str:
 
 def _safe_span_name(span: ReadableSpan, attributes: dict[str, Any]) -> str:
     route = attributes.get("http.route")
-    method = attributes.get(
-        "http.request.method", attributes.get("http.method", "HTTP")
-    )
+    method = attributes.get("http.request.method", attributes.get("http.method", "HTTP"))
 
     if isinstance(route, str) and _SAFE_ROUTE.fullmatch(route):
         method_text = str(method).upper()
@@ -102,9 +100,7 @@ class SanitizingSpanExporter(SpanExporter):
             sanitized = [sanitize_span(span) for span in spans]
             return self._exporter.export(sanitized)
         except Exception as exc:
-            logger.warning(
-                "span sanitization/export failed error_type=%s", type(exc).__name__
-            )
+            logger.warning("span sanitization/export failed error_type=%s", type(exc).__name__)
             return SpanExportResult.FAILURE
 
     def shutdown(self) -> None:

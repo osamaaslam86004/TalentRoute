@@ -114,7 +114,9 @@ def test_exception_type_name_excludes_the_message():
     assert "secret" not in exception_type_name(ProviderError("secret"))
 
 
-@pytest.mark.parametrize("code", ["rate_limit_exceeded", "context_length_exceeded", "invalid_api_key"])
+@pytest.mark.parametrize(
+    "code", ["rate_limit_exceeded", "context_length_exceeded", "invalid_api_key"]
+)
 def test_code_shaped_provider_codes_are_kept(code):
     assert stable_error_code(ProviderError("m", code=code)) == code
 
