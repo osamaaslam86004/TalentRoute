@@ -30,6 +30,7 @@ _dispatcher_heartbeat_gauge: Any | None = None
 _audit_chain_valid_gauge: Any | None = None
 _db_pool_in_use_gauge: Any | None = None
 _db_pool_available_gauge: Any | None = None
+_audit_head_lock_duration: Any | None = None
 
 _ALLOWED_AUTH_REASONS = frozenset(
     {"missing", "invalid", "forbidden", "jwks_unavailable"}
@@ -77,7 +78,7 @@ def initialize_metrics(settings: Settings) -> None:
     global _pipeline_events, _screening_duration, _queue_wait_duration
     global _end_to_end_duration, _outbox_dispatch_lag
     global _outbox_dead_gauge, _outbox_pending_gauge, _redis_queue_gauge, _dispatcher_heartbeat_gauge, _audit_chain_valid_gauge
-    global _db_pool_available_gauge, _db_pool_in_use_gauge
+    global _db_pool_available_gauge, _db_pool_in_use_gauge, _audit_head_lock_duration
 
     if not settings.otel_enabled:
         return
@@ -187,6 +188,11 @@ def initialize_metrics(settings: Settings) -> None:
             unit="{connection}",
             description="Database pool available connections",
         )
+        _audit_head_lock_duration = meter.create_histogram(
+            "app.audit.head_lock.duration",
+            unit="s",
+            description="Audit head lock acquisition time",
+        )
         _provider = provider
 
 
@@ -293,6 +299,17 @@ def record_outbox_dispatch_lag(seconds: float) -> None:
     _record_duration(_outbox_dispatch_lag, seconds)
 
 
+def record_audit_head_lock_duration(seconds: float, outcome: str = "success") -> None:
+    normalized = (
+        outcome if outcome in {"success", "failure", "timeout", "unknown"} else "unknown"
+    )
+    _record_duration(
+        _audit_head_lock_duration,
+        seconds,
+        sanitize_metric_labels({"outcome": normalized}),
+    )
+
+
 def record_pipeline_gauges(stats: dict[str, int | float], audit_valid: int = 1) -> None:
     global _outbox_dead_gauge, _outbox_pending_gauge, _redis_queue_gauge, _dispatcher_heartbeat_gauge, _audit_chain_valid_gauge
     global _db_pool_in_use_gauge, _db_pool_available_gauge
@@ -340,7 +357,7 @@ def shutdown_metrics() -> None:
         _request_counter = _request_duration = None
         _auth_failure_counter = _rate_limit_counter = None
         _pipeline_events = _screening_duration = _queue_wait_duration = None
-        _end_to_end_duration = _outbox_dispatch_lag = None
+        _end_to_end_duration = _outbox_dispatch_lag = _audit_head_lock_duration = None
     if provider is not None:
         try:
             provider.shutdown(timeout_millis=5000)

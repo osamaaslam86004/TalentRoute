@@ -15,6 +15,7 @@ This document outlines the telemetry architecture, metrics, tracing, alerts, and
   - Recorded via `TelemetryCallbackHandler` on LangChain graph executions
 - Tamper-evident audit chain integrity monitoring
   - `app_audit_chain_valid`
+  - `app_audit_head_lock_duration_seconds` (Audit head lock acquisition time for proactive tenant serialization bottleneck detection)
 
 ## Runbooks
 

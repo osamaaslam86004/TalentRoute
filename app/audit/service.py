@@ -7,6 +7,7 @@ provider responses, credentials, free-form reviewer notes, or unmatched request 
 from __future__ import annotations
 
 import math
+import time
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -19,6 +20,7 @@ from app.audit.integrity import GENESIS_HASH, audit_hash_payload, calculate_even
 from app.core.security import Principal
 from app.db.models.audit_chain_head import AuditChainHead
 from app.db.models.audit_event import AuditEvent
+from app.observability.metrics import record_audit_head_lock_duration
 
 _ALLOWED_METADATA = {
     "status",
@@ -91,12 +93,22 @@ async def record_audit_event(
         {"tenant_id": tenant_id, "genesis_hash": GENESIS_HASH},
     )
 
-    head = await session.scalar(
-        select(AuditChainHead)
-        .where(AuditChainHead.tenant_id == tenant_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
+    lock_start = time.perf_counter()
+    try:
+        head = await session.scalar(
+            select(AuditChainHead)
+            .where(AuditChainHead.tenant_id == tenant_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        record_audit_head_lock_duration(
+            max(0.0, time.perf_counter() - lock_start), outcome="success"
+        )
+    except Exception:
+        record_audit_head_lock_duration(
+            max(0.0, time.perf_counter() - lock_start), outcome="failure"
+        )
+        raise
 
     if head is None:
         raise RuntimeError("Unable to allocate audit chain head")
@@ -178,12 +190,22 @@ async def verify_audit_chain(
             {"tenant_id": tenant_id, "genesis_hash": GENESIS_HASH},
         )
 
-        head = await session.scalar(
-            select(AuditChainHead)
-            .where(AuditChainHead.tenant_id == tenant_id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
+        lock_start = time.perf_counter()
+        try:
+            head = await session.scalar(
+                select(AuditChainHead)
+                .where(AuditChainHead.tenant_id == tenant_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            record_audit_head_lock_duration(
+                max(0.0, time.perf_counter() - lock_start), outcome="success"
+            )
+        except Exception:
+            record_audit_head_lock_duration(
+                max(0.0, time.perf_counter() - lock_start), outcome="failure"
+            )
+            raise
 
         rows = list(
             (

@@ -23,6 +23,15 @@
           "expr": "sum(app_pipeline_events{event_type=\"audit.integrity_failed\"})"
         }
       ]
+    },
+    {
+      "title": "Audit Head Lock Duration (p95)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(app_audit_head_lock_duration_seconds_bucket[5m]))"
+        }
+      ]
     }
   ]
 }
