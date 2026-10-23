@@ -52,14 +52,16 @@ async def create_screening(
 ) -> ScreeningAccepted:
 
     if len(payload.application_text) > get_settings().max_application_chars:
-        raise HTTPException(status_code=413, detail="Application text exceeds configured limit")
+        raise HTTPException(
+            status_code=413, detail="Application text exceeds configured limit"
+        )
 
     await enforce_screening_rate_limit(request, principal)
 
     request_fingerprint = hashlib.sha256(
-        json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
+        json.dumps(
+            payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
     ).hexdigest()
 
     # An idempotency key is scoped to the authenticated tenant. Reusing it for
@@ -95,7 +97,9 @@ async def create_screening(
             return ScreeningAccepted(
                 id=existing.id,
                 status=existing.status,
-                poll_url=str(request.url_for("get_screening", screening_id=existing.id)),
+                poll_url=str(
+                    request.url_for("get_screening", screening_id=existing.id)
+                ),
             )
 
     row = Screening(
@@ -161,11 +165,16 @@ async def create_screening(
                 )
             )
 
-            if existing is not None and existing.request_fingerprint == request_fingerprint:
+            if (
+                existing is not None
+                and existing.request_fingerprint == request_fingerprint
+            ):
                 return ScreeningAccepted(
                     id=existing.id,
                     status=existing.status,
-                    poll_url=str(request.url_for("get_screening", screening_id=existing.id)),
+                    poll_url=str(
+                        request.url_for("get_screening", screening_id=existing.id)
+                    ),
                 )
             if existing is not None:
                 raise HTTPException(
@@ -227,7 +236,9 @@ async def get_screening_endpoint(
     row = await get_screening(session, screening_id, tenant_id=principal.tenant_id)
 
     if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Screening not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Screening not found"
+        )
 
     await record_audit_event(
         session,
@@ -256,10 +267,14 @@ async def delete_screening(
     principal: Principal = Depends(require_permission("screening:delete")),
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
-    row = await get_screening(session, screening_id, tenant_id=principal.tenant_id, for_update=True)
+    row = await get_screening(
+        session, screening_id, tenant_id=principal.tenant_id, for_update=True
+    )
 
     if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Screening not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Screening not found"
+        )
 
     await record_audit_event(
         session,
