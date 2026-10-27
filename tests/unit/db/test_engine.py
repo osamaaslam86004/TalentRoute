@@ -1,32 +1,36 @@
 """Unit tests for asynchronous engine configuration, pooling parameters, and connection error handling."""
-import pytest
-from unittest.mock import patch, MagicMock
-import asyncpg
-from sqlalchemy.exc import OperationalError
 
-from app.db.session import create_db_engine, check_database_health
+import importlib
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import asyncpg
+import pytest
+
+from app.db import session
+from app.db.session import check_database_health
 
 
 @pytest.mark.asyncio
 async def test_engine_initialization_parameters():
     """Verify that the async engine is created with correct pool configuration and database URL from settings."""
     mock_settings = MagicMock()
-    mock_settings.DATABASE_URL = "postgresql+asyncpg://screening:secret@db:5432/screening"
-    mock_settings.DB_POOL_SIZE = 10
-    mock_settings.DB_MAX_OVERFLOW = 20
-    mock_settings.DB_POOL_TIMEOUT = 30
-    mock_settings.DB_ECHO = False
+    mock_settings.database_url = (
+        "postgresql+asyncpg://screening:secret@db:5432/screening"
+    )
 
-    with patch("app.db.session.create_async_engine") as mock_create_engine:
-        create_db_engine(mock_settings)
+    with (
+        patch("app.db.session.get_settings", return_value=mock_settings),
+        patch("app.db.session.create_async_engine") as mock_create_engine,
+    ):
+        # Reload the session module to trigger module-level engine creation with mock settings
+        importlib.reload(session)
 
         mock_create_engine.assert_called_once_with(
-            mock_settings.DATABASE_URL,
-            pool_size=10,
-            max_overflow=20,
-            pool_timeout=30,
-            echo=False,
-            pool_pre_ping=True
+            mock_settings.database_url,
+            pool_pre_ping=True,
+            pool_size=5,
+            max_overflow=10,
+            pool_recycle=1800,
         )
 
 
@@ -38,7 +42,7 @@ async def test_database_health_check_success():
     mock_engine.connect.return_value.__aenter__.return_value = mock_conn
 
     is_healthy = await check_database_health(mock_engine)
-    
+
     assert is_healthy is True
     mock_conn.execute.assert_awaited_once()
 

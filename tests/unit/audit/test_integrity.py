@@ -83,7 +83,9 @@ class TestTimestamp:
 
     def test_equivalent_instants_in_different_zones_serialise_identically(self):
         utc_value = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
-        offset_value = datetime(2026, 6, 1, 14, 0, 0, tzinfo=timezone(timedelta(hours=2)))
+        offset_value = datetime(
+            2026, 6, 1, 14, 0, 0, tzinfo=timezone(timedelta(hours=2))
+        )
         assert _timestamp(utc_value) == _timestamp(offset_value)
 
     def test_naive_datetime_is_rejected(self):
@@ -92,7 +94,9 @@ class TestTimestamp:
 
     def test_output_matches_iso_8601_shape(self):
         result = _timestamp(datetime.now(UTC))
-        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}\+00:00", result)
+        assert re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}\+00:00", result
+        )
 
 
 # --------------------------------------------------------------------------- audit_hash_payload
@@ -124,7 +128,9 @@ class TestAuditHashPayload:
         assert isinstance(payload["occurred_at"], str)
 
     def test_actor_roles_are_sorted_for_canonical_ordering(self):
-        payload = audit_hash_payload(**make_payload_kwargs(actor_roles=["zeta", "alpha", "mid"]))
+        payload = audit_hash_payload(
+            **make_payload_kwargs(actor_roles=["zeta", "alpha", "mid"])
+        )
         assert payload["actor_roles"] == ["alpha", "mid", "zeta"]
 
     def test_actor_roles_input_list_is_not_mutated(self):
@@ -138,7 +144,10 @@ class TestAuditHashPayload:
         assert calculate_event_hash(first) == calculate_event_hash(second)
 
     def test_empty_roles_are_preserved_as_an_empty_list(self):
-        assert audit_hash_payload(**make_payload_kwargs(actor_roles=[]))["actor_roles"] == []
+        assert (
+            audit_hash_payload(**make_payload_kwargs(actor_roles=[]))["actor_roles"]
+            == []
+        )
 
     @pytest.mark.parametrize("field", ["request_id", "resource_id"])
     def test_optional_fields_accept_none(self, field):
@@ -176,7 +185,10 @@ class TestCalculateEventHash:
     def test_matches_an_independently_computed_sha256_of_canonical_json(self):
         payload = {"b": 1, "a": [1, 2], "c": {"z": None, "y": "x"}}
         canonical = '{"a":[1,2],"b":1,"c":{"y":"x","z":null}}'
-        assert calculate_event_hash(payload) == hashlib.sha256(canonical.encode()).hexdigest()
+        assert (
+            calculate_event_hash(payload)
+            == hashlib.sha256(canonical.encode()).hexdigest()
+        )
 
     def test_is_deterministic(self):
         payload = audit_hash_payload(**make_payload_kwargs())
@@ -194,7 +206,9 @@ class TestCalculateEventHash:
 
     def test_separators_are_compact(self):
         """A pretty-printed encoding would hash differently, so lock the compact form in."""
-        pretty = hashlib.sha256(json.dumps({"a": 1}, sort_keys=True).encode()).hexdigest()
+        pretty = hashlib.sha256(
+            json.dumps({"a": 1}, sort_keys=True).encode()
+        ).hexdigest()
         assert calculate_event_hash({"a": 1}) != pretty
 
     @pytest.mark.parametrize(
@@ -245,7 +259,9 @@ class TestCalculateEventHash:
         )
         offset_payload = audit_hash_payload(
             **make_payload_kwargs(
-                occurred_at=datetime(2026, 1, 2, 8, 0, tzinfo=timezone(timedelta(hours=5)))
+                occurred_at=datetime(
+                    2026, 1, 2, 8, 0, tzinfo=timezone(timedelta(hours=5))
+                )
             )
         )
         assert calculate_event_hash(utc_payload) == calculate_event_hash(offset_payload)
@@ -262,7 +278,9 @@ class TestCalculateEventHash:
                 )
             )
             return calculate_event_hash(
-                audit_hash_payload(**make_payload_kwargs(sequence_no=2, previous_hash=first_hash))
+                audit_hash_payload(
+                    **make_payload_kwargs(sequence_no=2, previous_hash=first_hash)
+                )
             )
 
         assert chain("screening.read") != chain("screening.deleted")

@@ -37,8 +37,10 @@ def make_settings():
     def build(**overrides) -> Settings:
         values = dict(overrides)
         if values.get("environment") == "production":
-            values.setdefault("api_key", "test-key")  # production requires some auth config
-        return Settings(_env_file=None, **values)
+            values.setdefault(
+                "api_key", "test-key"
+            )  # production requires some auth config
+        return Settings(**values)
 
     return build
 

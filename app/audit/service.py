@@ -52,14 +52,18 @@ def safe_audit_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     for key, value in (metadata or {}).items():
         if key not in _ALLOWED_METADATA or value is None:
             continue
-        if isinstance(value, bool | int):
-            safe[key] = value
-        elif isinstance(value, float) and math.isfinite(value):
+        if (
+            isinstance(value, bool | int)
+            or isinstance(value, float)
+            and math.isfinite(value)
+        ):
             safe[key] = value
         elif isinstance(value, str):
             safe[key] = value[:160]
         elif isinstance(value, list | tuple):
-            safe[key] = [str(item)[:80] for item in value[:20] if isinstance(item, str | int)]
+            safe[key] = [
+                str(item)[:80] for item in value[:20] if isinstance(item, str | int)
+            ]
 
     return safe
 
@@ -113,7 +117,9 @@ async def record_audit_event(
 
     event_id = uuid.uuid4()
     occurred_at = datetime.now(UTC)
-    subject = (actor_subject or (principal.subject if principal else "service:worker"))[:255]
+    subject = (actor_subject or (principal.subject if principal else "service:worker"))[
+        :255
+    ]
     roles = sorted(principal.roles) if principal else (actor_roles or ["service"])
     request_id = (request_id or "")[:64] or None
     action = action[:120]
@@ -166,7 +172,9 @@ async def record_audit_event(
     return event
 
 
-async def verify_audit_chain(session: AsyncSession, *, tenant_id: str) -> dict[str, Any]:
+async def verify_audit_chain(
+    session: AsyncSession, *, tenant_id: str
+) -> dict[str, Any]:
     """Verify event sequence, predecessor links, row hashes and stored chain head
     using a Repeatable Read snapshot to prevent race conditions without blocking concurrent appends.
     """
@@ -256,7 +264,10 @@ async def verify_audit_chain(session: AsyncSession, *, tenant_id: str) -> dict[s
         if (
             reason is None
             and head is not None
-            and (head.last_sequence != expected_head_sequence or head.last_hash != previous_hash)
+            and (
+                head.last_sequence != expected_head_sequence
+                or head.last_hash != previous_hash
+            )
         ):
             first_failure = expected_head_sequence + 1
             reason = "chain_head_mismatch"
@@ -303,7 +314,10 @@ async def list_audit_events(
     )
 
     count = int(
-        await session.scalar(select(func.count()).select_from(AuditEvent).where(*filters)) or 0
+        await session.scalar(
+            select(func.count()).select_from(AuditEvent).where(*filters)
+        )
+        or 0
     )
 
     return items, count

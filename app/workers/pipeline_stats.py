@@ -52,7 +52,9 @@ async def collect_pipeline_statistics() -> dict[str, int | float]:
         stats["outbox_dead"] = outbox_counts.get("dead", 0)
 
         oldest_pending = await session.scalar(
-            select(func.min(OutboxEvent.created_at)).where(OutboxEvent.status == "pending")
+            select(func.min(OutboxEvent.created_at)).where(
+                OutboxEvent.status == "pending"
+            )
         )
         if oldest_pending:
             stats["outbox_oldest_pending_age_seconds"] = (
@@ -72,7 +74,9 @@ async def collect_pipeline_statistics() -> dict[str, int | float]:
         stats["db_pool_available"] = getattr(pool, "checkedin", lambda: 0)()
 
     except Exception as exc:
-        logger.warning("failed to collect db pool stats error_type=%s", type(exc).__name__)
+        logger.warning(
+            "failed to collect db pool stats error_type=%s", type(exc).__name__
+        )
         stats["db_pool_in_use"] = 0
         stats["db_pool_available"] = 0
 
@@ -84,7 +88,9 @@ async def collect_pipeline_statistics() -> dict[str, int | float]:
         stats["dispatcher_heartbeat_present"] = 1 if hb else 0
 
     except Exception as exc:
-        logger.warning("failed to check redis queue length error_type=%s", type(exc).__name__)
+        logger.warning(
+            "failed to check redis queue length error_type=%s", type(exc).__name__
+        )
         stats["dispatcher_heartbeat_present"] = 0
 
     record_pipeline_event("pipeline.stats_collected", outcome="success", stage="outbox")

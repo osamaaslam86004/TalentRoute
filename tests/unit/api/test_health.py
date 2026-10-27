@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 

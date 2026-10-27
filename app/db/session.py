@@ -1,5 +1,7 @@
 from collections.abc import AsyncGenerator
 
+import asyncpg
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -15,7 +17,8 @@ settings = get_settings()
 
 
 def create_worker_engine(database_url: str | None = None) -> AsyncEngine:
-    """Create an async SQLAlchemy engine using NullPool for Celery workers to avoid event loop binding errors."""
+    """Create an async SQLAlchemy engine using NullPool for Celery workers to avoid
+    event loop binding errors."""
     return create_async_engine(
         database_url or settings.database_url,
         poolclass=NullPool,
@@ -32,7 +35,9 @@ engine = create_async_engine(
 
 register_db_pool_listeners(engine)
 
-AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+AsyncSessionLocal = async_sessionmaker(
+    engine, class_=AsyncSession, expire_on_commit=False
+)
 
 worker_engine = create_worker_engine()
 WorkerAsyncSessionLocal = async_sessionmaker(
@@ -47,6 +52,17 @@ def configure_worker_db() -> None:
     AsyncSessionLocal.configure(bind=worker_engine)
 
 
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Dependency that yields an async database session, committing on success and rolling back on error."""
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         yield session
@@ -55,3 +71,13 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
 async def get_worker_session() -> AsyncGenerator[AsyncSession, None]:
     async with WorkerAsyncSessionLocal() as session:
         yield session
+
+
+async def check_database_health(engine: AsyncEngine) -> bool:
+    """Check database health by running a probe query, catching interface or connection errors."""
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return True
+    except (asyncpg.InterfaceError, Exception):
+        return False

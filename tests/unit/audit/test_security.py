@@ -10,6 +10,7 @@ annotations of the small throw-away routes defined in the HTTP-level tests.
 import asyncio
 import dataclasses
 import hmac
+import inspect
 import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -50,7 +51,9 @@ EXPECTED_PERMISSION_ROLES = {
 }
 ALL_ROLES = sorted(set().union(*EXPECTED_PERMISSION_ROLES.values()))
 
-MISSING = object()  # sentinel: the claim is absent from the token (as opposed to None / blank)
+MISSING = (
+    object()
+)  # sentinel: the claim is absent from the token (as opposed to None / blank)
 
 
 # --------------------------------------------------------------------------- helpers / fixtures
@@ -124,7 +127,11 @@ def jwt_env():
         patch.object(security.jwt, "decode", return_value=claims) as decode,
     ):
         yield SimpleNamespace(
-            claims=claims, client=client, factory=factory, decode=decode, signing_key=signing_key
+            claims=claims,
+            client=client,
+            factory=factory,
+            decode=decode,
+            signing_key=signing_key,
         )
 
 
@@ -137,7 +144,11 @@ class TestPrincipalCan:
 
     @pytest.mark.parametrize(
         ("permission", "role"),
-        [(p, r) for p, roles in EXPECTED_PERMISSION_ROLES.items() for r in sorted(roles)],
+        [
+            (p, r)
+            for p, roles in EXPECTED_PERMISSION_ROLES.items()
+            for r in sorted(roles)
+        ],
     )
     def test_each_documented_role_grants_its_permission(self, permission, role):
         assert make_principal(roles={role}).can(permission) is True
@@ -156,8 +167,13 @@ class TestPrincipalCan:
 
     @pytest.mark.parametrize("auth_method", ["oidc", "api_key", "development", "other"])
     @pytest.mark.parametrize("permission", [*EXPECTED_PERMISSION_ROLES, "made:up"])
-    def test_admin_role_grants_everything_for_every_auth_method(self, auth_method, permission):
-        assert make_principal(roles={"admin"}, auth_method=auth_method).can(permission) is True
+    def test_admin_role_grants_everything_for_every_auth_method(
+        self, auth_method, permission
+    ):
+        assert (
+            make_principal(roles={"admin"}, auth_method=auth_method).can(permission)
+            is True
+        )
 
     def test_scope_grants_exactly_the_named_permission(self):
         principal = make_principal(scopes={"screening:read"})
@@ -172,7 +188,9 @@ class TestPrincipalCan:
         assert principal.can("audit:read") is True
 
     @pytest.mark.parametrize("auth_method", ["api_key", "development"])
-    def test_wildcard_scope_grants_everything_for_trusted_local_auth_methods(self, auth_method):
+    def test_wildcard_scope_grants_everything_for_trusted_local_auth_methods(
+        self, auth_method
+    ):
         principal = make_principal(scopes={"*"}, auth_method=auth_method)
 
         assert principal.can("screening:delete") is True
@@ -272,7 +290,9 @@ class TestClaimStrings:
     def test_collections_are_stripped_and_blank_items_removed(self, value, expected):
         assert _claim_strings(value) == frozenset(expected)
 
-    @pytest.mark.parametrize("value", [None, 5, 1.5, True, {"a": 1}, object(), b"bytes"])
+    @pytest.mark.parametrize(
+        "value", [None, 5, 1.5, True, {"a": 1}, object(), b"bytes"]
+    )
     def test_unsupported_types_yield_an_empty_set(self, value):
         assert _claim_strings(value) == frozenset()
 
@@ -284,13 +304,19 @@ class TestClaimStrings:
 
 # =========================================================================== _decode_oidc_token
 class TestDecodeOidcTokenConfiguration:
-    @pytest.mark.parametrize("missing", ["oidc_issuer", "oidc_audience", "oidc_jwks_url"])
-    def test_any_missing_oidc_setting_yields_503(self, missing, make_oidc_settings, auth_failures):
+    @pytest.mark.parametrize(
+        "missing", ["oidc_issuer", "oidc_audience", "oidc_jwks_url"]
+    )
+    def test_any_missing_oidc_setting_yields_503(
+        self, missing, make_oidc_settings, auth_failures
+    ):
         settings = make_oidc_settings().model_copy(update={missing: None})
 
-        with patch.object(security, "_jwks_client") as factory:
-            with pytest.raises(HTTPException) as raised:
-                _decode_oidc_token("tok", settings)
+        with (
+            patch.object(security, "_jwks_client") as factory,
+            pytest.raises(HTTPException) as raised,
+        ):
+            _decode_oidc_token("tok", settings)
 
         assert raised.value.status_code == 503
         assert raised.value.detail == "OIDC authentication is not configured"
@@ -330,7 +356,10 @@ class TestDecodeOidcTokenSize:
 class TestDecodeOidcTokenVerification:
     def test_valid_token_is_mapped_to_a_principal(self, make_oidc_settings, jwt_env):
         jwt_env.claims.update(
-            {"roles": ["recruiter", "reviewer"], "scope": "screening:read screening:write"}
+            {
+                "roles": ["recruiter", "reviewer"],
+                "scope": "screening:read screening:write",
+            }
         )
 
         principal = _decode_oidc_token("tok", make_oidc_settings())
@@ -343,7 +372,9 @@ class TestDecodeOidcTokenVerification:
             auth_method="oidc",
         )
 
-    def test_decoder_is_called_with_strict_verification_options(self, make_oidc_settings, jwt_env):
+    def test_decoder_is_called_with_strict_verification_options(
+        self, make_oidc_settings, jwt_env
+    ):
         settings = make_oidc_settings(oidc_algorithms=["RS256", "ES256"])
 
         _decode_oidc_token("the.token", settings)
@@ -377,7 +408,9 @@ class TestDecodeOidcTokenVerification:
         jwt_env.decode.assert_not_called()
 
     def test_unknown_key_id_is_a_401(self, make_oidc_settings, jwt_env, auth_failures):
-        jwt_env.client.get_signing_key_from_jwt.side_effect = PyJWKClientError("kid not found")
+        jwt_env.client.get_signing_key_from_jwt.side_effect = PyJWKClientError(
+            "kid not found"
+        )
 
         with pytest.raises(HTTPException) as raised:
             _decode_oidc_token("tok", make_oidc_settings())
@@ -468,7 +501,9 @@ class TestDecodeOidcTokenSubject:
 
 
 class TestDecodeOidcTokenTenant:
-    def test_tenant_is_taken_from_the_claim_and_stripped(self, make_oidc_settings, jwt_env):
+    def test_tenant_is_taken_from_the_claim_and_stripped(
+        self, make_oidc_settings, jwt_env
+    ):
         jwt_env.claims["tenant_id"] = "  acme-corp  "
 
         assert _decode_oidc_token("tok", make_oidc_settings()).tenant_id == "acme-corp"
@@ -498,14 +533,20 @@ class TestDecodeOidcTokenTenant:
         else:
             jwt_env.claims["tenant_id"] = tenant
 
-        principal = _decode_oidc_token("tok", make_oidc_settings(oidc_require_tenant_claim=False))
+        principal = _decode_oidc_token(
+            "tok", make_oidc_settings(oidc_require_tenant_claim=False)
+        )
 
         assert principal.tenant_id == "default"
 
-    def test_non_string_tenant_is_stringified_when_not_required(self, make_oidc_settings, jwt_env):
+    def test_non_string_tenant_is_stringified_when_not_required(
+        self, make_oidc_settings, jwt_env
+    ):
         jwt_env.claims["tenant_id"] = 123
 
-        principal = _decode_oidc_token("tok", make_oidc_settings(oidc_require_tenant_claim=False))
+        principal = _decode_oidc_token(
+            "tok", make_oidc_settings(oidc_require_tenant_claim=False)
+        )
 
         assert principal.tenant_id == "123"
 
@@ -521,27 +562,37 @@ class TestDecodeOidcTokenTenant:
         jwt_env.claims["tenant_id"] = tenant
 
         with pytest.raises(HTTPException) as raised:
-            _decode_oidc_token("tok", make_oidc_settings(oidc_require_tenant_claim=required))
+            _decode_oidc_token(
+                "tok", make_oidc_settings(oidc_require_tenant_claim=required)
+            )
 
         assert raised.value.status_code == 403
         assert raised.value.detail == "Access token has an invalid tenant claim"
         auth_failures.assert_called_once_with("forbidden")
 
-    def test_tenant_of_exactly_128_characters_is_accepted(self, make_oidc_settings, jwt_env):
+    def test_tenant_of_exactly_128_characters_is_accepted(
+        self, make_oidc_settings, jwt_env
+    ):
         jwt_env.claims["tenant_id"] = "t" * 128
 
         assert _decode_oidc_token("tok", make_oidc_settings()).tenant_id == "t" * 128
 
-    def test_tenant_with_inner_spaces_and_unicode_is_accepted(self, make_oidc_settings, jwt_env):
+    def test_tenant_with_inner_spaces_and_unicode_is_accepted(
+        self, make_oidc_settings, jwt_env
+    ):
         jwt_env.claims["tenant_id"] = "Ünï Corp 42"
 
-        assert _decode_oidc_token("tok", make_oidc_settings()).tenant_id == "Ünï Corp 42"
+        assert (
+            _decode_oidc_token("tok", make_oidc_settings()).tenant_id == "Ünï Corp 42"
+        )
 
     def test_custom_tenant_claim_name_is_honoured(self, make_oidc_settings, jwt_env):
         jwt_env.claims.pop("tenant_id")
         jwt_env.claims["org"] = "globex"
 
-        principal = _decode_oidc_token("tok", make_oidc_settings(oidc_tenant_claim="org"))
+        principal = _decode_oidc_token(
+            "tok", make_oidc_settings(oidc_tenant_claim="org")
+        )
 
         assert principal.tenant_id == "globex"
 
@@ -557,7 +608,9 @@ class TestDecodeOidcTokenTenant:
     ):
         jwt_env.claims["tenant_id"] = "   "
 
-        principal = _decode_oidc_token("tok", make_oidc_settings(oidc_require_tenant_claim=False))
+        principal = _decode_oidc_token(
+            "tok", make_oidc_settings(oidc_require_tenant_claim=False)
+        )
 
         assert principal.tenant_id == "default"
 
@@ -578,7 +631,9 @@ class TestDecodeOidcTokenRolesAndScopes:
     def test_roles_are_normalised(self, raw, expected, make_oidc_settings, jwt_env):
         jwt_env.claims["roles"] = raw
 
-        assert _decode_oidc_token("tok", make_oidc_settings()).roles == frozenset(expected)
+        assert _decode_oidc_token("tok", make_oidc_settings()).roles == frozenset(
+            expected
+        )
 
     def test_missing_roles_claim_yields_no_roles(self, make_oidc_settings, jwt_env):
         jwt_env.claims.pop("roles")
@@ -589,7 +644,9 @@ class TestDecodeOidcTokenRolesAndScopes:
         jwt_env.claims.pop("roles")
         jwt_env.claims["groups"] = "auditor"
 
-        principal = _decode_oidc_token("tok", make_oidc_settings(oidc_roles_claim="groups"))
+        principal = _decode_oidc_token(
+            "tok", make_oidc_settings(oidc_roles_claim="groups")
+        )
 
         assert principal.roles == frozenset({"auditor"})
         assert principal.can("audit:read")
@@ -615,7 +672,9 @@ class TestDecodeOidcTokenRolesAndScopes:
     def test_scopes_are_normalised(self, raw, expected, make_oidc_settings, jwt_env):
         jwt_env.claims["scope"] = raw
 
-        assert _decode_oidc_token("tok", make_oidc_settings()).scopes == frozenset(expected)
+        assert _decode_oidc_token("tok", make_oidc_settings()).scopes == frozenset(
+            expected
+        )
 
     def test_no_scope_claims_at_all_yield_no_scopes(self, make_oidc_settings, jwt_env):
         jwt_env.claims.pop("scope")
@@ -632,12 +691,16 @@ class TestDecodeOidcTokenRolesAndScopes:
 
         assert principal.scopes == frozenset({"screening:read", "audit:read"})
 
-    def test_custom_scope_claim_wins_over_scp_and_scope(self, make_oidc_settings, jwt_env):
+    def test_custom_scope_claim_wins_over_scp_and_scope(
+        self, make_oidc_settings, jwt_env
+    ):
         jwt_env.claims.update(
             {"permissions": ["audit:read"], "scp": "ignored:a", "scope": "ignored:b"}
         )
 
-        principal = _decode_oidc_token("tok", make_oidc_settings(oidc_scopes_claim="permissions"))
+        principal = _decode_oidc_token(
+            "tok", make_oidc_settings(oidc_scopes_claim="permissions")
+        )
 
         assert principal.scopes == frozenset({"audit:read"})
 
@@ -646,7 +709,9 @@ class TestDecodeOidcTokenRolesAndScopes:
     ):
         jwt_env.claims.update({"scp": "from:scp", "scope": "from:scope"})
 
-        principal = _decode_oidc_token("tok", make_oidc_settings(oidc_scopes_claim="permissions"))
+        principal = _decode_oidc_token(
+            "tok", make_oidc_settings(oidc_scopes_claim="permissions")
+        )
 
         assert principal.scopes == frozenset({"from:scp"})
 
@@ -655,14 +720,18 @@ class TestDecodeOidcTokenRolesAndScopes:
     ):
         jwt_env.claims["scope"] = "from:scope"
 
-        principal = _decode_oidc_token("tok", make_oidc_settings(oidc_scopes_claim="permissions"))
+        principal = _decode_oidc_token(
+            "tok", make_oidc_settings(oidc_scopes_claim="permissions")
+        )
 
         assert principal.scopes == frozenset({"from:scope"})
 
     def test_plural_scope_spellings_are_aliased_and_originals_kept(
         self, make_oidc_settings, jwt_env
     ):
-        jwt_env.claims["scope"] = "screenings:read screenings:write screenings:delete other:scope"
+        jwt_env.claims["scope"] = (
+            "screenings:read screenings:write screenings:delete other:scope"
+        )
 
         principal = _decode_oidc_token("tok", make_oidc_settings())
 
@@ -687,7 +756,9 @@ class TestDecodeOidcTokenRolesAndScopes:
 
         assert principal.scopes == frozenset({"screening:read", "screenings:admin"})
 
-    def test_aliased_scope_grants_the_canonical_permission_only(self, make_oidc_settings, jwt_env):
+    def test_aliased_scope_grants_the_canonical_permission_only(
+        self, make_oidc_settings, jwt_env
+    ):
         jwt_env.claims["roles"] = []  # isolate scopes from the default 'recruiter' role
         jwt_env.claims["scope"] = "screenings:write"
 
@@ -697,7 +768,9 @@ class TestDecodeOidcTokenRolesAndScopes:
         assert principal.can("screening:read") is False
         assert principal.can("screening:delete") is False
 
-    def test_wildcard_scope_in_a_token_does_not_grant_access(self, make_oidc_settings, jwt_env):
+    def test_wildcard_scope_in_a_token_does_not_grant_access(
+        self, make_oidc_settings, jwt_env
+    ):
         jwt_env.claims["roles"] = []  # isolate scopes from the default 'recruiter' role
         jwt_env.claims["scope"] = "*"
 
@@ -717,7 +790,9 @@ class TestJwksClientFactory:
 
     def test_client_is_cached_per_url_with_safe_defaults(self):
         with patch.object(security, "PyJWKClient") as constructor:
-            constructor.side_effect = lambda *args, **kwargs: MagicMock()  # a new client per call
+            constructor.side_effect = lambda *args, **kwargs: (
+                MagicMock()
+            )  # a new client per call
             first = security._jwks_client("https://a.example/jwks")
             again = security._jwks_client("https://a.example/jwks")
             other = security._jwks_client("https://b.example/jwks")
@@ -745,21 +820,27 @@ class TestUnauthorizedAndBindHelpers:
 
         auth_failures.assert_called_once_with("missing")
 
-    def test_bind_principal_sets_request_state_and_telemetry_context(self, make_settings):
-        request = make_request()
+    def test_bind_principal_sets_request_state_and_telemetry_context(
+        self, make_settings
+    ):
+        request = make_request()  # type: ignore[arg-type]
         principal = make_principal(subject="alice@example.com", tenant_id="acme")
 
-        security._bind_principal(request, principal, make_settings())
+        security._bind_principal(request, principal, make_settings())  # type: ignore[arg-type]
 
         assert request.state.actor_subject == "alice@example.com"
         assert request.state.tenant_id == "acme"
-        assert context_fields() == {"tenant_id": "acme"}  # no salt -> no actor identity at all
+        assert context_fields() == {
+            "tenant_id": "acme"
+        }  # no salt -> no actor identity at all
 
-    def test_bind_principal_never_puts_the_raw_subject_into_telemetry(self, make_settings):
+    def test_bind_principal_never_puts_the_raw_subject_into_telemetry(
+        self, make_settings
+    ):
         settings = make_settings(telemetry_hash_salt="pepper")
         principal = make_principal(subject="alice@example.com")
 
-        security._bind_principal(make_request(), principal, settings)
+        security._bind_principal(make_request(), principal, settings)  # type: ignore[arg-type]
 
         fields = context_fields()
         assert fields["actor_hash"] == actor_hash("alice@example.com", settings)
@@ -774,7 +855,10 @@ class TestGetPrincipalOidc:
         self, mode, use_settings, monkeypatch
     ):
         settings = use_settings(
-            auth_mode=mode, oidc_issuer=ISSUER, oidc_audience=AUDIENCE, oidc_jwks_url=JWKS_URL
+            auth_mode=mode,
+            oidc_issuer=ISSUER,
+            oidc_audience=AUDIENCE,
+            oidc_jwks_url=JWKS_URL,
         )
         expected = make_principal(roles={"recruiter"}, tenant_id="acme")
         seen = {}
@@ -785,24 +869,36 @@ class TestGetPrincipalOidc:
             return expected
 
         monkeypatch.setattr(security, "_decode_oidc_token", fake_decode)
-        request = make_request()
+        request = make_request()  # type: ignore[arg-type]
 
-        principal = await get_principal(request, provided_key=None, bearer=bearer("abc.def"))
+        principal = await get_principal(
+            request,  # type: ignore[arg-type]
+            provided_key=None,
+            bearer=bearer("abc.def"),  # type: ignore[arg-type]
+        )
 
         assert principal is expected
         assert seen["args"] == ("abc.def", settings)
-        assert seen["thread"] != threading.get_ident()  # blocking JWKS I/O must not stall the loop
+        assert (
+            seen["thread"] != threading.get_ident()
+        )  # blocking JWKS I/O must not stall the loop
         assert request.state.actor_subject == expected.subject
         assert request.state.tenant_id == "acme"
         assert context_fields()["tenant_id"] == "acme"
 
-    async def test_bearer_takes_precedence_over_a_valid_api_key(self, use_settings, monkeypatch):
+    async def test_bearer_takes_precedence_over_a_valid_api_key(
+        self, use_settings, monkeypatch
+    ):
         use_settings(auth_mode="auto", api_key="the-secret")
         decoded = make_principal()
         decode = MagicMock(return_value=decoded)
         monkeypatch.setattr(security, "_decode_oidc_token", decode)
 
-        principal = await get_principal(make_request(), provided_key="the-secret", bearer=bearer())
+        principal = await get_principal(
+            make_request(),  # type: ignore[arg-type]
+            provided_key="the-secret",
+            bearer=bearer(),  # type: ignore[arg-type]
+        )
 
         assert principal is decoded
         assert principal.auth_method == "oidc"
@@ -814,20 +910,31 @@ class TestGetPrincipalOidc:
     ):
         use_settings(auth_mode="auto", api_key="the-secret")
         error = HTTPException(status_code=status_code, detail="rejected")
-        monkeypatch.setattr(security, "_decode_oidc_token", MagicMock(side_effect=error))
-
-        with pytest.raises(HTTPException) as raised:
-            await get_principal(make_request(), provided_key="the-secret", bearer=bearer())
-
-        assert raised.value is error
-
-    async def test_oidc_mode_without_a_bearer_is_unauthorised(self, use_settings, auth_failures):
-        use_settings(
-            auth_mode="oidc", oidc_issuer=ISSUER, oidc_audience=AUDIENCE, oidc_jwks_url=JWKS_URL
+        monkeypatch.setattr(
+            security, "_decode_oidc_token", MagicMock(side_effect=error)
         )
 
         with pytest.raises(HTTPException) as raised:
-            await get_principal(make_request(), provided_key=None, bearer=None)
+            await get_principal(
+                make_request(),  # type: ignore[arg-type]
+                provided_key="the-secret",
+                bearer=bearer(),  # type: ignore[arg-type]
+            )
+
+        assert raised.value is error
+
+    async def test_oidc_mode_without_a_bearer_is_unauthorised(
+        self, use_settings, auth_failures
+    ):
+        use_settings(
+            auth_mode="oidc",
+            oidc_issuer=ISSUER,
+            oidc_audience=AUDIENCE,
+            oidc_jwks_url=JWKS_URL,
+        )
+
+        with pytest.raises(HTTPException) as raised:
+            await get_principal(make_request(), provided_key=None, bearer=None)  # type: ignore[arg-type]
 
         assert raised.value.status_code == 401
         assert raised.value.detail == "Authentication required"
@@ -845,18 +952,20 @@ class TestGetPrincipalOidc:
         )
 
         with pytest.raises(HTTPException) as raised:
-            await get_principal(make_request(), provided_key="the-secret", bearer=None)
+            await get_principal(make_request(), provided_key="the-secret", bearer=None)  # type: ignore[arg-type]
 
-        assert raised.value.status_code == 401  # API keys are never accepted in oidc mode
+        assert (
+            raised.value.status_code == 401
+        )  # API keys are never accepted in oidc mode
         auth_failures.assert_called_once_with("invalid")
 
 
 class TestGetPrincipalApiKey:
     async def test_valid_key_yields_the_api_key_principal(self, use_settings):
         use_settings(auth_mode="api_key", api_key="the-secret")
-        request = make_request()
+        request = make_request()  # type: ignore[arg-type]
 
-        principal = await get_principal(request, provided_key="the-secret", bearer=None)
+        principal = await get_principal(request, provided_key="the-secret", bearer=None)  # type: ignore[arg-type]
 
         assert principal == Principal(
             subject="api-key-client",
@@ -873,26 +982,31 @@ class TestGetPrincipalApiKey:
     async def test_key_comparison_uses_hmac_compare_digest(self, use_settings):
         use_settings(auth_mode="api_key", api_key="the-secret")
 
-        with patch.object(security.hmac, "compare_digest", wraps=hmac.compare_digest) as compare:
-            await get_principal(make_request(), provided_key="the-secret", bearer=None)
+        with patch.object(
+            security.hmac, "compare_digest", wraps=hmac.compare_digest
+        ) as compare:
+            await get_principal(make_request(), provided_key="the-secret", bearer=None)  # type: ignore[arg-type]
 
         compare.assert_called_once_with("the-secret", "the-secret")
 
     async def test_actor_hash_is_bound_when_a_salt_is_configured(self, use_settings):
-        settings = use_settings(auth_mode="api_key", api_key="k", telemetry_hash_salt="pepper")
+        settings = use_settings(
+            auth_mode="api_key", api_key="k", telemetry_hash_salt="pepper"
+        )
 
-        await get_principal(make_request(), provided_key="k", bearer=None)
+        await get_principal(make_request(), provided_key="k", bearer=None)  # type: ignore[arg-type]
 
         assert context_fields()["actor_hash"] == actor_hash("api-key-client", settings)
 
     @pytest.mark.parametrize(
-        "wrong", ["wrong", "the-secre", "the-secret ", "THE-SECRET", "the-secret-extra", " "]
+        "wrong",
+        ["wrong", "the-secre", "the-secret ", "THE-SECRET", "the-secret-extra", " "],
     )
     async def test_wrong_keys_are_rejected(self, wrong, use_settings, auth_failures):
         use_settings(auth_mode="api_key", api_key="the-secret")
 
         with pytest.raises(HTTPException) as raised:
-            await get_principal(make_request(), provided_key=wrong, bearer=None)
+            await get_principal(make_request(), provided_key=wrong, bearer=None)  # type: ignore[arg-type]
 
         assert raised.value.status_code == 401
         assert raised.value.detail == "Invalid or missing credentials"
@@ -900,11 +1014,13 @@ class TestGetPrincipalApiKey:
         auth_failures.assert_called_once_with("invalid")
 
     @pytest.mark.parametrize("provided", [None, ""])
-    async def test_absent_key_is_reported_as_missing(self, provided, use_settings, auth_failures):
+    async def test_absent_key_is_reported_as_missing(
+        self, provided, use_settings, auth_failures
+    ):
         use_settings(auth_mode="api_key", api_key="the-secret")
 
         with pytest.raises(HTTPException) as raised:
-            await get_principal(make_request(), provided_key=provided, bearer=None)
+            await get_principal(make_request(), provided_key=provided, bearer=None)  # type: ignore[arg-type]
 
         assert raised.value.status_code == 401
         auth_failures.assert_called_once_with("missing")
@@ -917,11 +1033,13 @@ class TestGetPrincipalApiKey:
         monkeypatch.setattr(security, "_decode_oidc_token", decode)
 
         with pytest.raises(HTTPException) as raised:
-            await get_principal(make_request(), provided_key=None, bearer=bearer())
+            await get_principal(make_request(), provided_key=None, bearer=bearer())  # type: ignore[arg-type]
 
         assert raised.value.status_code == 401
         decode.assert_not_called()
-        auth_failures.assert_called_once_with("invalid")  # a credential was offered, just unusable
+        auth_failures.assert_called_once_with(
+            "invalid"
+        )  # a credential was offered, just unusable
 
     async def test_valid_key_still_works_when_a_bearer_is_also_sent_in_api_key_mode(
         self, use_settings, monkeypatch
@@ -930,7 +1048,11 @@ class TestGetPrincipalApiKey:
         decode = MagicMock()
         monkeypatch.setattr(security, "_decode_oidc_token", decode)
 
-        principal = await get_principal(make_request(), provided_key="the-secret", bearer=bearer())
+        principal = await get_principal(
+            make_request(),  # type: ignore[arg-type]
+            provided_key="the-secret",
+            bearer=bearer(),  # type: ignore[arg-type]
+        )
 
         assert principal.auth_method == "api_key"
         decode.assert_not_called()
@@ -941,7 +1063,7 @@ class TestGetPrincipalApiKey:
         use_settings(auth_mode="auto", api_key="the-secret", environment="development")
 
         with pytest.raises(HTTPException) as raised:
-            await get_principal(make_request(), provided_key=None, bearer=None)
+            await get_principal(make_request(), provided_key=None, bearer=None)  # type: ignore[arg-type]
 
         assert raised.value.status_code == 401
         auth_failures.assert_called_once_with("missing")
@@ -952,7 +1074,7 @@ class TestGetPrincipalApiKey:
         use_settings(auth_mode="auto", api_key="the-secret", environment="test")
 
         with pytest.raises(HTTPException):
-            await get_principal(make_request(), provided_key="nope", bearer=None)
+            await get_principal(make_request(), provided_key="nope", bearer=None)  # type: ignore[arg-type]
 
     @pytest.mark.xfail(
         strict=True,
@@ -963,22 +1085,26 @@ class TestGetPrincipalApiKey:
             "a 401 into a 500. Compare bytes (e.g. .encode('utf-8')) instead."
         ),
     )
-    async def test_non_ascii_api_key_header_is_rejected_with_401_not_a_crash(self, use_settings):
+    async def test_non_ascii_api_key_header_is_rejected_with_401_not_a_crash(
+        self, use_settings
+    ):
         use_settings(auth_mode="api_key", api_key="the-secret")
 
         with pytest.raises(HTTPException) as raised:
-            await get_principal(make_request(), provided_key="caf\u00e9", bearer=None)
+            await get_principal(make_request(), provided_key="caf\u00e9", bearer=None)  # type: ignore[arg-type]
 
         assert raised.value.status_code == 401
 
 
 class TestGetPrincipalDevelopmentFallback:
     @pytest.mark.parametrize("environment", ["development", "test"])
-    async def test_auto_mode_without_any_key_grants_local_admin(self, environment, use_settings):
+    async def test_auto_mode_without_any_key_grants_local_admin(
+        self, environment, use_settings
+    ):
         use_settings(auth_mode="auto", environment=environment)
-        request = make_request()
+        request = make_request()  # type: ignore[arg-type]
 
-        principal = await get_principal(request, provided_key=None, bearer=None)
+        principal = await get_principal(request, provided_key=None, bearer=None)  # type: ignore[arg-type]
 
         assert principal == Principal(
             subject="local-development",
@@ -991,11 +1117,13 @@ class TestGetPrincipalDevelopmentFallback:
         assert request.state.actor_subject == "local-development"
         assert context_fields() == {"tenant_id": "default"}
 
-    async def test_staging_has_no_development_fallback(self, use_settings, auth_failures):
+    async def test_staging_has_no_development_fallback(
+        self, use_settings, auth_failures
+    ):
         use_settings(auth_mode="auto", environment="staging")
 
         with pytest.raises(HTTPException) as raised:
-            await get_principal(make_request(), provided_key=None, bearer=None)
+            await get_principal(make_request(), provided_key=None, bearer=None)  # type: ignore[arg-type]
 
         assert raised.value.status_code == 401
         assert raised.value.detail == "Invalid or missing credentials"
@@ -1013,7 +1141,7 @@ class TestGetPrincipalDevelopmentFallback:
         )
 
         with pytest.raises(HTTPException) as raised:
-            await get_principal(make_request(), provided_key=None, bearer=None)
+            await get_principal(make_request(), provided_key=None, bearer=None)  # type: ignore[arg-type]
 
         assert raised.value.status_code == 401
 
@@ -1038,7 +1166,9 @@ class TestRequirePermission:
         auth_failures.assert_called_once_with("forbidden")
 
     async def test_successful_check_records_no_auth_failure(self, auth_failures):
-        await require_permission("audit:read")(principal=make_principal(roles={"auditor"}))
+        await require_permission("audit:read")(
+            principal=make_principal(roles={"auditor"})
+        )
 
         auth_failures.assert_not_called()
 
@@ -1078,9 +1208,16 @@ class TestRequirePermission:
         assert require_permission("audit:read") is not require_permission("audit:read")
 
     def test_dependency_declares_get_principal_as_its_sub_dependency(self):
-        default = require_permission("audit:read").__defaults__[0]
+        dep = require_permission("audit:read")
+        sig = inspect.signature(dep)
 
-        assert default.dependency is get_principal
+        # Inspect the 'principal' parameter definition
+        param = sig.parameters.get("principal")
+        assert param is not None
+
+        # param.default holds the Depends(...) instance
+        sub_dependency = param.default
+        assert sub_dependency.dependency is get_principal
 
     async def test_dependency_is_a_coroutine_function(self):
         assert asyncio.iscoroutinefunction(require_permission("audit:read"))
@@ -1116,7 +1253,9 @@ class TestHttpWiring:
         assert response.status_code == 200
         assert response.json() == {"subject": "api-key-client", "method": "api_key"}
 
-    async def test_missing_credentials_yield_401_with_www_authenticate(self, use_settings):
+    async def test_missing_credentials_yield_401_with_www_authenticate(
+        self, use_settings
+    ):
         use_settings(auth_mode="api_key", api_key="the-secret")
 
         response = await get("/me")
@@ -1130,9 +1269,13 @@ class TestHttpWiring:
 
         assert (await get("/me", {"X-API-Key": "nope"})).status_code == 401
 
-    async def test_authorization_bearer_header_reaches_the_decoder(self, use_settings, monkeypatch):
+    async def test_authorization_bearer_header_reaches_the_decoder(
+        self, use_settings, monkeypatch
+    ):
         use_settings(auth_mode="auto", api_key="the-secret")
-        decode = MagicMock(return_value=make_principal(subject="oidc-user", roles={"auditor"}))
+        decode = MagicMock(
+            return_value=make_principal(subject="oidc-user", roles={"auditor"})
+        )
         monkeypatch.setattr(security, "_decode_oidc_token", decode)
 
         response = await get("/me", {"Authorization": "Bearer abc.def.ghi"})
@@ -1141,7 +1284,9 @@ class TestHttpWiring:
         assert response.json() == {"subject": "oidc-user", "method": "oidc"}
         assert decode.call_args.args[0] == "abc.def.ghi"
 
-    async def test_non_bearer_authorization_scheme_is_ignored(self, use_settings, monkeypatch):
+    async def test_non_bearer_authorization_scheme_is_ignored(
+        self, use_settings, monkeypatch
+    ):
         use_settings(auth_mode="auto", api_key="the-secret")
         decode = MagicMock()
         monkeypatch.setattr(security, "_decode_oidc_token", decode)
@@ -1159,12 +1304,16 @@ class TestHttpWiring:
         assert response.status_code == 200
         assert response.json()["method"] == "development"
 
-    async def test_permitted_role_reaches_a_protected_route(self, use_settings, monkeypatch):
+    async def test_permitted_role_reaches_a_protected_route(
+        self, use_settings, monkeypatch
+    ):
         use_settings(auth_mode="auto", api_key="the-secret")
         monkeypatch.setattr(
             security,
             "_decode_oidc_token",
-            MagicMock(return_value=make_principal(subject="auditor-1", roles={"auditor"})),
+            MagicMock(
+                return_value=make_principal(subject="auditor-1", roles={"auditor"})
+            ),
         )
 
         response = await get("/audit", {"Authorization": "Bearer t"})
@@ -1172,7 +1321,9 @@ class TestHttpWiring:
         assert response.status_code == 200
         assert response.json() == {"subject": "auditor-1"}
 
-    async def test_unpermitted_role_gets_403_on_a_protected_route(self, use_settings, monkeypatch):
+    async def test_unpermitted_role_gets_403_on_a_protected_route(
+        self, use_settings, monkeypatch
+    ):
         use_settings(auth_mode="auto", api_key="the-secret")
         monkeypatch.setattr(
             security,

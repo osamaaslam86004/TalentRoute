@@ -1,6 +1,10 @@
 from typing import NotRequired, TypedDict
 
-from app.schemas.assessment import ExperienceAssessment, Recommendation, SkillsAssessment
+from app.schemas.assessment import (
+    ExperienceAssessment,
+    Recommendation,
+    SkillsAssessment,
+)
 
 
 class ScreeningState(TypedDict):

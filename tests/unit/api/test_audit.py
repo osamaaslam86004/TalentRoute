@@ -4,22 +4,21 @@
 
 from __future__ import annotations
 
-import uuid
-import pytest
 import unittest
-
+import uuid
 from datetime import UTC, datetime
-
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi import FastAPI, status
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from app.api.v1.endpoints.audit import router as audit_router
-from app.main import app
 from app.core.security import Principal, require_permission
 from app.db.models.audit_event import AuditEvent
 from app.db.session import get_db_session
+from app.main import app
 
 
 @pytest.fixture
@@ -39,7 +38,7 @@ def client():
             yield from walk(node.dependencies)
 
     for route in app.routes:
-        if hasattr(route, "dependant"):
+        if isinstance(route, APIRoute):
             for dep in walk(route.dependant.dependencies):
                 if getattr(dep, "__module__", "") == "app.core.security":
                     app.dependency_overrides[dep] = lambda: MagicMock(

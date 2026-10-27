@@ -12,6 +12,7 @@ Tests cover:
 from __future__ import annotations
 
 import unittest
+
 from app.privacy.pii_redaction import RedactionResult, redact_pii
 
 

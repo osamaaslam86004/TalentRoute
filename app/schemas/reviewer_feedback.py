@@ -47,7 +47,9 @@ class ReviewerFeedbackCreate(BaseModel):
         unknown = set(unique).difference(ALLOWED_REASON_CODES)
 
         if unknown:
-            raise ValueError(f"Unsupported reason code(s): {', '.join(sorted(unknown))}")
+            raise ValueError(
+                f"Unsupported reason code(s): {', '.join(sorted(unknown))}"
+            )
 
         if not unique:
             raise ValueError("At least one reason code is required")

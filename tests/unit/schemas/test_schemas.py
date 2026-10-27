@@ -28,9 +28,11 @@ def test_request_rejects_blank_skill_set():
 
 def test_assessment_confidence_is_bounded():
     with pytest.raises(ValidationError):
-        ExperienceAssessment(level=ExperienceLevel.MID_LEVEL, confidence=1.2, rationale="test")
+        ExperienceAssessment(
+            level=ExperienceLevel.MID_LEVEL, confidence=1.2, rationale="test"
+        )
 
 
 def test_skill_match_uses_controlled_vocabulary():
     with pytest.raises(ValidationError):
-        SkillsAssessment(match="Hire now", confidence=0.8, rationale="test")
+        SkillsAssessment(match="Hire now", confidence=0.8, rationale="test")  # type: ignore[arg-type]

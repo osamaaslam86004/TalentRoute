@@ -24,7 +24,9 @@ logger = logging.getLogger("outbox.requeue")
 logger.setLevel(logging.INFO)
 
 
-async def requeue_dead_events(*, event_id: uuid.UUID | None, all_dead: bool, limit: int) -> int:
+async def requeue_dead_events(
+    *, event_id: uuid.UUID | None, all_dead: bool, limit: int
+) -> int:
 
     async with AsyncSessionLocal() as session:
         statement = select(OutboxEvent).where(OutboxEvent.status == "dead")
@@ -32,8 +34,12 @@ async def requeue_dead_events(*, event_id: uuid.UUID | None, all_dead: bool, lim
         if event_id is not None:
             statement = statement.where(OutboxEvent.id == event_id)
 
-        statement = statement.order_by(OutboxEvent.created_at.asc()).limit(1 if event_id else limit)
-        rows = list((await session.scalars(statement.with_for_update(skip_locked=True))).all())
+        statement = statement.order_by(OutboxEvent.created_at.asc()).limit(
+            1 if event_id else limit
+        )
+        rows = list(
+            (await session.scalars(statement.with_for_update(skip_locked=True))).all()
+        )
 
         if event_id is not None and not rows:
             raise ValueError("event id was not found in dead-letter state")
@@ -104,7 +110,9 @@ def main() -> int:
 
     try:
         changed = asyncio.run(
-            requeue_dead_events(event_id=event_id, all_dead=args.all_dead, limit=args.limit)
+            requeue_dead_events(
+                event_id=event_id, all_dead=args.all_dead, limit=args.limit
+            )
         )
     except ValueError as exc:
         parser.error(str(exc))

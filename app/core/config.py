@@ -9,7 +9,9 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 class Settings(BaseSettings):
     """Runtime configuration. Secrets must be injected by the deployment environment."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     app_name: str = "LangGraph Candidate Screening API"
     environment: Literal["development", "test", "staging", "production"] = "development"
@@ -40,7 +42,9 @@ class Settings(BaseSettings):
     oidc_scopes_claim: str = "scope"
     oidc_tenant_claim: str = "tenant_id"
     oidc_require_tenant_claim: bool = True
-    oidc_algorithms: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["RS256"])
+    oidc_algorithms: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["RS256"]
+    )
 
     database_url: str = (
         "postgresql+asyncpg://screening:screening_dev_password@localhost:5432/screening"
@@ -114,11 +118,17 @@ class Settings(BaseSettings):
         if self.auth_mode == "api_key" and not self.api_key:
             raise ValueError("API_KEY is required when AUTH_MODE=api_key")
         if self.environment == "production":
-            oidc_ready = bool(self.oidc_issuer and self.oidc_audience and self.oidc_jwks_url)
+            oidc_ready = bool(
+                self.oidc_issuer and self.oidc_audience and self.oidc_jwks_url
+            )
             if self.auth_mode == "oidc" and not oidc_ready:
-                raise ValueError("Complete OIDC configuration is required in production")
+                raise ValueError(
+                    "Complete OIDC configuration is required in production"
+                )
             if self.auth_mode == "auto" and not (self.api_key or oidc_ready):
-                raise ValueError("Configure OIDC or API_KEY for production authentication")
+                raise ValueError(
+                    "Configure OIDC or API_KEY for production authentication"
+                )
         return self
 
 

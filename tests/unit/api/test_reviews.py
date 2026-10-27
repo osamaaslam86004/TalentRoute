@@ -10,10 +10,11 @@ Tests cover:
 
 from __future__ import annotations
 
+import unittest
 import uuid
 from datetime import UTC, datetime
-import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+
 from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 

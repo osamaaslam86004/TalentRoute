@@ -27,10 +27,13 @@ def test_sensitive_content_is_removed_from_span_attributes_events_and_status():
     )
     exported = sanitize_span(span)
     serialized = repr(exported)
+
+    attributes = dict(exported.attributes) if exported.attributes else {}
+
     assert CANARY_TEXT not in serialized
     assert CANARY_EMAIL not in serialized
-    assert "app.stage" in exported.attributes
-    assert "application_text" not in exported.attributes
+    assert "app.stage" in attributes
+    assert "application_text" not in attributes
     assert exported.events == ()
     assert exported.status.description is None
 

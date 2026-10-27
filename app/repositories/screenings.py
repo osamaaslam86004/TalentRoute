@@ -44,7 +44,10 @@ async def list_screenings(
     )
 
     count = int(
-        await session.scalar(select(func.count()).select_from(Screening).where(tenant_filter)) or 0
+        await session.scalar(
+            select(func.count()).select_from(Screening).where(tenant_filter)
+        )
+        or 0
     )
 
     return rows, count

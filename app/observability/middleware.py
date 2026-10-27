@@ -6,6 +6,7 @@ query strings, request bodies, and authorization headers are never recorded here
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 import uuid
@@ -33,7 +34,11 @@ _STANDARD_METHODS = frozenset(
 
 def _request_id(headers: list[tuple[bytes, bytes]]) -> str:
     supplied = next(
-        (value.decode("latin-1") for key, value in headers if key.lower() == b"x-request-id"),
+        (
+            value.decode("latin-1")
+            for key, value in headers
+            if key.lower() == b"x-request-id"
+        ),
         None,
     )
     try:
@@ -62,7 +67,9 @@ class RequestTelemetryMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    async def __call__(self, scope: dict[str, Any], receive: ASGIReceive, send: ASGISend) -> None:
+    async def __call__(
+        self, scope: dict[str, Any], receive: ASGIReceive, send: ASGISend
+    ) -> None:
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return
@@ -106,22 +113,22 @@ class RequestTelemetryMiddleware:
             finally:
                 duration_seconds = max(0.0, time.perf_counter() - started)
                 route = _route_template(scope)
-                try:
+                with contextlib.suppress(Exception):
                     record_http_request(
                         route=route,
                         method=method,
                         status_code=response_status,
                         duration_seconds=duration_seconds,
                     )
-                except Exception:
-                    pass
                 extra: dict[str, Any] = {
                     "event": "http.request.completed",
                     "method": method,
                     "route": route,
                     "status_code": response_status,
                     "duration_ms": round(duration_seconds * 1000, 3),
-                    "outcome": ("error" if failed or response_status >= 500 else "success"),
+                    "outcome": (
+                        "error" if failed or response_status >= 500 else "success"
+                    ),
                 }
                 if failed:
                     extra["error_type"] = error_type

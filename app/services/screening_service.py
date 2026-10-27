@@ -29,26 +29,42 @@ async def process_screening(
             screening = await get_screening(session, screening_id, for_update=True)
 
         if screening is None:
-            logger.warning("screening task references missing record id=%s", screening_id)
+            logger.warning(
+                "screening task references missing record id=%s", screening_id
+            )
             return
 
         if screening.status == "completed":
-            record_pipeline_event("screening.duplicate", outcome="duplicate", stage="claim")
+            record_pipeline_event(
+                "screening.duplicate", outcome="duplicate", stage="claim"
+            )
             return  # Idempotent for task redelivery after a successful commit.
 
         now = datetime.now(UTC)
 
-        if screening.status == "running" and screening.processing_started_at is not None:
+        if (
+            screening.status == "running"
+            and screening.processing_started_at is not None
+        ):
             age_seconds = (now - screening.processing_started_at).total_seconds()
 
-            if not allow_reclaim_running and age_seconds < settings.stale_processing_seconds:
+            if (
+                not allow_reclaim_running
+                and age_seconds < settings.stale_processing_seconds
+            ):
                 logger.info("duplicate screening task ignored id=%s", screening_id)
-                record_pipeline_event("screening.duplicate", outcome="duplicate", stage="claim")
+                record_pipeline_event(
+                    "screening.duplicate", outcome="duplicate", stage="claim"
+                )
                 return
 
             if allow_reclaim_running:
-                logger.warning("reclaiming redelivered running task id=%s", screening_id)
-                record_pipeline_event("screening.reclaimed", outcome="reclaimed", stage="claim")
+                logger.warning(
+                    "reclaiming redelivered running task id=%s", screening_id
+                )
+                record_pipeline_event(
+                    "screening.reclaimed", outcome="reclaimed", stage="claim"
+                )
 
             else:
                 logger.warning(
@@ -89,7 +105,9 @@ async def process_screening(
             result = await graph.ainvoke(
                 {
                     "screening_id": str(screening_id),
-                    "application_text": redaction.text[: settings.max_application_chars],
+                    "application_text": redaction.text[
+                        : settings.max_application_chars
+                    ],
                     "job_title": job_title,
                     "required_skills": required_skills,
                 },

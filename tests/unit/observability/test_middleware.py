@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 from opentelemetry.sdk.trace import Event, ReadableSpan
+from opentelemetry.sdk.trace.export import SpanExporter
 from opentelemetry.trace import Status, StatusCode
 
 from app.observability.middleware import RequestTelemetryMiddleware
@@ -15,7 +16,7 @@ class _Route:
     path = "/api/v1/screenings/{screening_id}"
 
 
-class _MemoryExporter:
+class _MemoryExporter(SpanExporter):
     def __init__(self) -> None:
         self.spans: list[ReadableSpan] = []
 
@@ -62,7 +63,9 @@ async def test_middleware_sets_correlation_and_security_headers(monkeypatch):
 
     await RequestTelemetryMiddleware(downstream)(scope, receive, send)
 
-    start = next(message for message in sent if message["type"] == "http.response.start")
+    start = next(
+        message for message in sent if message["type"] == "http.response.start"
+    )
     headers = dict(start["headers"])
     request_id = headers[b"x-request-id"].decode("ascii")
     assert str(uuid.UUID(request_id)) == request_id

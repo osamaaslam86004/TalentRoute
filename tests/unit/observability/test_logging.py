@@ -24,7 +24,14 @@ def test_json_line_carries_service_metadata_and_omits_unbound_context(configure)
     assert line["service"] == "svc" and line["version"] == "9.9.9"
     assert line["environment"] == "development" and line["role"] == "api"
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z", line["timestamp"])
-    for absent in ("request_id", "tenant_id", "screening_id", "task_id", "actor_hash", "trace_id"):
+    for absent in (
+        "request_id",
+        "tenant_id",
+        "screening_id",
+        "task_id",
+        "actor_hash",
+        "trace_id",
+    ):
         assert absent not in line
 
 
@@ -34,7 +41,11 @@ def test_json_line_includes_bound_context_and_role(configure):
     logging.getLogger("demo").info("working")
 
     (line,) = records(stream)
-    assert (line["request_id"], line["tenant_id"], line["screening_id"]) == ("req-1", "acme", "s-1")
+    assert (line["request_id"], line["tenant_id"], line["screening_id"]) == (
+        "req-1",
+        "acme",
+        "s-1",
+    )
     assert line["role"] == "worker"
 
 
@@ -42,7 +53,11 @@ def test_only_allow_listed_extras_are_emitted(configure):
     stream = configure(log_format="json")
     logging.getLogger("demo").info(
         "done",
-        extra={"duration_ms": 12.5, "event": "x.done", "application_text": "SENSITIVE-RESUME"},
+        extra={
+            "duration_ms": 12.5,
+            "event": "x.done",
+            "application_text": "SENSITIVE-RESUME",
+        },
     )
 
     assert "SENSITIVE-RESUME" not in stream.getvalue()
@@ -54,7 +69,9 @@ def test_only_allow_listed_extras_are_emitted(configure):
 def test_extra_cannot_spoof_correlation_fields(configure):
     stream = configure(log_format="json")
     bind_context(tenant_id="real-tenant")
-    logging.getLogger("demo").info("x", extra={"tenant_id": "evil", "request_id": "forged"})
+    logging.getLogger("demo").info(
+        "x", extra={"tenant_id": "evil", "request_id": "forged"}
+    )
 
     (line,) = records(stream)
     assert line["tenant_id"] == "real-tenant"
@@ -63,7 +80,9 @@ def test_extra_cannot_spoof_correlation_fields(configure):
 
 def test_newlines_in_a_message_cannot_forge_a_second_record(configure):
     stream = configure(log_format="json")
-    logging.getLogger("demo").info("first\n" + '{"level":"CRITICAL","message":"forged"}')
+    logging.getLogger("demo").info(
+        "first\n" + '{"level":"CRITICAL","message":"forged"}'
+    )
     assert len(records(stream)) == 1
 
 
@@ -83,7 +102,9 @@ def _log_failure(exc: Exception) -> None:
 
 def test_production_json_replaces_exception_text_with_type_code_and_frames(configure):
     stream = configure(log_format="json", environment="production")
-    _log_failure(ProviderError("echoed jane@example.com resume text", code="rate_limit_exceeded"))
+    _log_failure(
+        ProviderError("echoed jane@example.com resume text", code="rate_limit_exceeded")
+    )
 
     raw = stream.getvalue()
     assert "jane@example.com" not in raw and "resume text" not in raw
@@ -119,7 +140,9 @@ def test_development_json_keeps_the_full_traceback(configure):
 
 
 # ---------------------------------------------------------------- console format
-def test_console_output_is_identical_to_the_legacy_format_when_nothing_is_bound(configure):
+def test_console_output_is_identical_to_the_legacy_format_when_nothing_is_bound(
+    configure,
+):
     stream = configure()
     logging.getLogger("demo").info("hello")
 

@@ -51,4 +51,6 @@ class TelemetryCallbackHandler(AsyncCallbackHandler):
             duration * 1000,
             err_type,
         )
-        record_pipeline_event("llm.failed", outcome="failure", stage="graph", error_type=err_type)
+        record_pipeline_event(
+            "llm.failed", outcome="failure", stage="graph", error_type=err_type
+        )

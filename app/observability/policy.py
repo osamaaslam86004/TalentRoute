@@ -158,7 +158,9 @@ def _bool_or_str(value: Any) -> str:
     return str(value)
 
 
-def sanitize_metric_labels(labels: Mapping[str, Any], *, strict: bool = False) -> dict[str, str]:
+def sanitize_metric_labels(
+    labels: Mapping[str, Any], *, strict: bool = False
+) -> dict[str, str]:
     """Keep only allow-listed labels and bound their values.
 
     With ``strict=True`` an unknown or forbidden label raises ``ValueError``; otherwise it is dropped.
@@ -177,9 +179,13 @@ def sanitize_metric_labels(labels: Mapping[str, Any], *, strict: bool = False) -
 
 
 def is_allowed_span_attribute(key: str) -> bool:
-    if key in DENIED_SPAN_ATTRIBUTE_KEYS or key.startswith(DENIED_SPAN_ATTRIBUTE_PREFIXES):
+    if key in DENIED_SPAN_ATTRIBUTE_KEYS or key.startswith(
+        DENIED_SPAN_ATTRIBUTE_PREFIXES
+    ):
         return False
-    return key in ALLOWED_SPAN_ATTRIBUTE_KEYS or key.startswith(ALLOWED_SPAN_ATTRIBUTE_PREFIXES)
+    return key in ALLOWED_SPAN_ATTRIBUTE_KEYS or key.startswith(
+        ALLOWED_SPAN_ATTRIBUTE_PREFIXES
+    )
 
 
 def _scalar(value: Any) -> str | bool | int | float | None:
@@ -229,7 +235,9 @@ def actor_hash(subject: str | None, settings: Settings | None = None) -> str | N
     salt = secret.get_secret_value() if secret else ""
     if not subject or not salt:
         return None
-    return hmac.new(salt.encode("utf-8"), subject.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
+    return hmac.new(
+        salt.encode("utf-8"), subject.encode("utf-8"), hashlib.sha256
+    ).hexdigest()[:16]
 
 
 _ERROR_CODE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
@@ -240,7 +248,9 @@ def exception_type_name(exc: BaseException | type[BaseException]) -> str:
 
     cls = exc if isinstance(exc, type) else type(exc)
     name = (
-        cls.__qualname__ if cls.__module__ == "builtins" else f"{cls.__module__}.{cls.__qualname__}"
+        cls.__qualname__
+        if cls.__module__ == "builtins"
+        else f"{cls.__module__}.{cls.__qualname__}"
     )
     return name[:120]
 

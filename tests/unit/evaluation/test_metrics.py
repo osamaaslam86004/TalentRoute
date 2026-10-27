@@ -11,7 +11,6 @@ Tests cover:
 
 from __future__ import annotations
 
-import math
 import unittest
 from typing import Any
 
@@ -72,9 +71,18 @@ class TestAccuracyMetric(unittest.TestCase):
     def test_accuracy_calculation_correct_and_incorrect(self) -> None:
         """Verify exact match count, total count, and accuracy calculation."""
         records: list[tuple[dict[str, Any], dict[str, Any]]] = [
-            ({"gold": {"experience_level": "Senior-level"}}, {"experience_level": "Senior-level"}),
-            ({"gold": {"experience_level": "Mid-level"}}, {"experience_level": "Mid-level"}),
-            ({"gold": {"experience_level": "Entry-level"}}, {"experience_level": "Senior-level"}),  # mismatch
+            (
+                {"gold": {"experience_level": "Senior-level"}},
+                {"experience_level": "Senior-level"},
+            ),
+            (
+                {"gold": {"experience_level": "Mid-level"}},
+                {"experience_level": "Mid-level"},
+            ),
+            (
+                {"gold": {"experience_level": "Entry-level"}},
+                {"experience_level": "Senior-level"},
+            ),  # mismatch
         ]
 
         res = _accuracy(records, "experience_level", iterations=100)
@@ -147,14 +155,29 @@ class TestCalibrationSummary(unittest.TestCase):
     def test_calibration_summary_valid_points(self) -> None:
         """Verify calibration metrics calculation for valid confidence float inputs."""
         records: list[tuple[dict[str, Any], dict[str, Any]]] = [
-            ({"gold": {"skills_match": "Match"}}, {"skills_match": "Match", "skills_confidence": 0.9}),
-            ({"gold": {"skills_match": "Match"}}, {"skills_match": "Match", "skills_confidence": 0.8}),
-            ({"gold": {"skills_match": "Match"}}, {"skills_match": "No match", "skills_confidence": 0.7}),
-            ({"gold": {"skills_match": "Match"}}, {"skills_match": "No match", "skills_confidence": 0.2}),
+            (
+                {"gold": {"skills_match": "Match"}},
+                {"skills_match": "Match", "skills_confidence": 0.9},
+            ),
+            (
+                {"gold": {"skills_match": "Match"}},
+                {"skills_match": "Match", "skills_confidence": 0.8},
+            ),
+            (
+                {"gold": {"skills_match": "Match"}},
+                {"skills_match": "No match", "skills_confidence": 0.7},
+            ),
+            (
+                {"gold": {"skills_match": "Match"}},
+                {"skills_match": "No match", "skills_confidence": 0.2},
+            ),
         ]
 
         summary = _calibration_summary(
-            records, label_field="skills_match", confidence_field="skills_confidence", bins_count=5
+            records,
+            label_field="skills_match",
+            confidence_field="skills_confidence",
+            bins_count=5,
         )
 
         self.assertEqual(summary["sample_count"], 4)
@@ -174,7 +197,9 @@ class TestCalibrationSummary(unittest.TestCase):
             ({"gold": {"f": "A"}}, {"f": "A", "conf": 1.5}),  # out of bounds
         ]
 
-        summary = _calibration_summary(records, label_field="f", confidence_field="conf")
+        summary = _calibration_summary(
+            records, label_field="f", confidence_field="conf"
+        )
         self.assertEqual(summary["sample_count"], 0)
         self.assertIsNone(summary["mean_confidence"])
         self.assertIsNone(summary["brier_score"])
@@ -187,7 +212,9 @@ class TestCalibrationSummary(unittest.TestCase):
             ({"gold": {"f": "A"}}, {"f": "A", "conf": 1.0}),
         ]
 
-        summary = _calibration_summary(records, label_field="f", confidence_field="conf", bins_count=2)
+        summary = _calibration_summary(
+            records, label_field="f", confidence_field="conf", bins_count=2
+        )
         self.assertEqual(summary["sample_count"], 2)
         self.assertEqual(summary["mean_confidence"], 0.5)
 
@@ -219,14 +246,24 @@ class TestSchemaValid(unittest.TestCase):
 
     def test_schema_valid_invalid_enum_values_fail(self) -> None:
         """Verify unapproved enum strings for experience, skills, or recommendation fail."""
-        self.assertFalse(_schema_valid(dict(self.valid_prediction, experience_level="Executive")))
-        self.assertFalse(_schema_valid(dict(self.valid_prediction, skills_match="Perfect")))
-        self.assertFalse(_schema_valid(dict(self.valid_prediction, recommendation="auto_hire")))
+        self.assertFalse(
+            _schema_valid(dict(self.valid_prediction, experience_level="Executive"))
+        )
+        self.assertFalse(
+            _schema_valid(dict(self.valid_prediction, skills_match="Perfect"))
+        )
+        self.assertFalse(
+            _schema_valid(dict(self.valid_prediction, recommendation="auto_hire"))
+        )
 
     def test_schema_valid_evidence_length_limits(self) -> None:
         """Verify evidence lists exceeding item count limits fail validation."""
-        too_much_exp = dict(self.valid_prediction, experience_evidence=["item"] * 9)  # max 8
-        too_much_skills = dict(self.valid_prediction, skills_evidence=["item"] * 13)  # max 12
+        too_much_exp = dict(
+            self.valid_prediction, experience_evidence=["item"] * 9
+        )  # max 8
+        too_much_skills = dict(
+            self.valid_prediction, skills_evidence=["item"] * 13
+        )  # max 12
 
         self.assertFalse(_schema_valid(too_much_exp))
         self.assertFalse(_schema_valid(too_much_skills))
@@ -250,10 +287,18 @@ class TestSchemaValid(unittest.TestCase):
 
     def test_schema_valid_confidence_type_and_range_limits(self) -> None:
         """Verify confidence values must be numeric, non-boolean, and between 0.0 and 1.0."""
-        self.assertFalse(_schema_valid(dict(self.valid_prediction, experience_confidence=True)))
-        self.assertFalse(_schema_valid(dict(self.valid_prediction, skills_confidence="0.9")))
-        self.assertFalse(_schema_valid(dict(self.valid_prediction, experience_confidence=-0.1)))
-        self.assertFalse(_schema_valid(dict(self.valid_prediction, skills_confidence=1.05)))
+        self.assertFalse(
+            _schema_valid(dict(self.valid_prediction, experience_confidence=True))
+        )
+        self.assertFalse(
+            _schema_valid(dict(self.valid_prediction, skills_confidence="0.9"))
+        )
+        self.assertFalse(
+            _schema_valid(dict(self.valid_prediction, experience_confidence=-0.1))
+        )
+        self.assertFalse(
+            _schema_valid(dict(self.valid_prediction, skills_confidence=1.05))
+        )
 
 
 class TestReleaseGateThresholds(unittest.TestCase):
@@ -303,7 +348,9 @@ class TestReleaseGateThresholds(unittest.TestCase):
 
         gate = compare_reports(self.base_report, candidate, max_accuracy_drop=0.03)
         self.assertFalse(gate["passed"])
-        self.assertTrue(any("experience_accuracy regressed" in f for f in gate["failures"]))
+        self.assertTrue(
+            any("experience_accuracy regressed" in f for f in gate["failures"])
+        )
 
     def test_compare_reports_schema_validity_drop_fails(self) -> None:
         """Verify gate fails when schema validity rate drops."""
@@ -321,12 +368,20 @@ class TestReleaseGateThresholds(unittest.TestCase):
         candidate = dict(self.base_report, model_version="v2.0")
         candidate["slices"] = {
             "engineering": {"sample_count": 10, "experience_accuracy": 0.95},
-            "sales": {"sample_count": 10, "experience_accuracy": 0.60},  # gap 0.35 > 0.20
+            "sales": {
+                "sample_count": 10,
+                "experience_accuracy": 0.60,
+            },  # gap 0.35 > 0.20
         }
 
         gate = compare_reports(self.base_report, candidate, max_slice_accuracy_gap=0.20)
         self.assertFalse(gate["passed"])
-        self.assertTrue(any("candidate slice gap for experience_accuracy" in f for f in gate["failures"]))
+        self.assertTrue(
+            any(
+                "candidate slice gap for experience_accuracy" in f
+                for f in gate["failures"]
+            )
+        )
 
     def test_compare_reports_distribution_shift_exceeded_fails(self) -> None:
         """Verify gate fails when output label distribution shifts significantly."""
@@ -339,7 +394,12 @@ class TestReleaseGateThresholds(unittest.TestCase):
 
         gate = compare_reports(self.base_report, candidate, max_distribution_shift=0.25)
         self.assertFalse(gate["passed"])
-        self.assertTrue(any("prediction distribution shift for experience_level" in f for f in gate["failures"]))
+        self.assertTrue(
+            any(
+                "prediction distribution shift for experience_level" in f
+                for f in gate["failures"]
+            )
+        )
 
     def test_compare_reports_latency_and_cost_increase_fails(self) -> None:
         """Verify gate fails when mean latency or cost increase exceeds thresholds."""
@@ -351,11 +411,16 @@ class TestReleaseGateThresholds(unittest.TestCase):
         )
 
         gate = compare_reports(
-            self.base_report, candidate, max_latency_increase=0.25, max_cost_increase=0.25
+            self.base_report,
+            candidate,
+            max_latency_increase=0.25,
+            max_cost_increase=0.25,
         )
         self.assertFalse(gate["passed"])
         self.assertTrue(any("mean latency increased" in f for f in gate["failures"]))
-        self.assertTrue(any("mean estimated cost increased" in f for f in gate["failures"]))
+        self.assertTrue(
+            any("mean estimated cost increased" in f for f in gate["failures"])
+        )
 
 
 if __name__ == "__main__":

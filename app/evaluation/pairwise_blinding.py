@@ -55,14 +55,20 @@ def create_blinded_pairs(
     """Return public review tasks and a private key mapping; input candidates must share case IDs."""
 
     a_by_id = {
-        row.get("case_id"): row for row in candidate_a if isinstance(row.get("case_id"), str)
+        row.get("case_id"): row
+        for row in candidate_a
+        if isinstance(row.get("case_id"), str)
     }
     b_by_id = {
-        row.get("case_id"): row for row in candidate_b if isinstance(row.get("case_id"), str)
+        row.get("case_id"): row
+        for row in candidate_b
+        if isinstance(row.get("case_id"), str)
     }
 
     if len(a_by_id) != len(candidate_a) or len(b_by_id) != len(candidate_b):
-        raise ValueError("Each pairwise prediction row must have a unique string case_id")
+        raise ValueError(
+            "Each pairwise prediction row must have a unique string case_id"
+        )
 
     common_ids = sorted(set(a_by_id).intersection(b_by_id))
 

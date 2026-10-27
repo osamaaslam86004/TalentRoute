@@ -27,7 +27,9 @@ return {count, ttl}
 
 @lru_cache(maxsize=4)
 def _redis_client(url: str) -> Redis:
-    return Redis.from_url(url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+    return Redis.from_url(
+        url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2
+    )
 
 
 def get_rate_limit_redis_client() -> Redis:
@@ -55,7 +57,9 @@ async def enforce_screening_rate_limit(request: Request, principal: Principal) -
         count, ttl = int(result[0]), max(1, int(result[1]))
 
     except (RedisError, OSError, TimeoutError) as exc:
-        logger.warning("rate limiter backend unavailable error_type=%s", type(exc).__name__)
+        logger.warning(
+            "rate limiter backend unavailable error_type=%s", type(exc).__name__
+        )
 
         if settings.rate_limit_fail_open:
             record_rate_limit_decision("backend_error_open")

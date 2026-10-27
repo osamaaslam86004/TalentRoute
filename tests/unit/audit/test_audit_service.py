@@ -227,7 +227,12 @@ class TestSafeAuditMetadata:
 
     def test_mixed_input_keeps_only_allow_listed_keys(self):
         result = safe_audit_metadata(
-            {"status": "completed", "count": 3, "application_text": "PRIVATE", "notes": "PRIVATE"}
+            {
+                "status": "completed",
+                "count": 3,
+                "application_text": "PRIVATE",
+                "notes": "PRIVATE",
+            }
         )
         assert result == {"status": "completed", "count": 3}
 
@@ -287,7 +292,13 @@ class TestSafeAuditMetadata:
 
     @pytest.mark.parametrize(
         "value",
-        [{"nested": "dict"}, {"a", "b"}, b"bytes", object(), datetime(2026, 1, 1, tzinfo=UTC)],
+        [
+            {"nested": "dict"},
+            {"a", "b"},
+            b"bytes",
+            object(),
+            datetime(2026, 1, 1, tzinfo=UTC),
+        ],
         ids=["dict", "set", "bytes", "object", "datetime"],
     )
     def test_unsupported_value_types_are_dropped(self, value):
@@ -301,7 +312,9 @@ class TestSafeAuditMetadata:
 
 # =========================================================================== record_audit_event
 class TestRecordAuditEvent:
-    async def test_first_event_starts_at_sequence_one_linked_to_genesis(self, lock_metric):
+    async def test_first_event_starts_at_sequence_one_linked_to_genesis(
+        self, lock_metric
+    ):
         head = make_head()
         session = make_session(head=head)
 
@@ -349,7 +362,9 @@ class TestRecordAuditEvent:
         session.add.assert_called_once_with(event)
         session.commit.assert_not_awaited()
 
-    async def test_genesis_head_is_initialised_idempotently_before_locking(self, lock_metric):
+    async def test_genesis_head_is_initialised_idempotently_before_locking(
+        self, lock_metric
+    ):
         session = make_session(head=make_head())
 
         await record(session)
@@ -366,10 +381,14 @@ class TestRecordAuditEvent:
 
         await record(session)
 
-        order = [c[0] for c in session.mock_calls if c[0] in {"execute", "scalar", "add"}]
+        order = [
+            c[0] for c in session.mock_calls if c[0] in {"execute", "scalar", "add"}
+        ]
         assert order == ["execute", "scalar", "add"]
 
-    async def test_chain_head_is_selected_with_a_row_lock_for_this_tenant(self, lock_metric):
+    async def test_chain_head_is_selected_with_a_row_lock_for_this_tenant(
+        self, lock_metric
+    ):
         session = make_session(head=make_head())
 
         await record(session)
@@ -406,21 +425,27 @@ class TestRecordAuditEvent:
         assert result["head_hash"] == events[-1].event_hash
 
     # ---- actor resolution
-    async def test_defaults_to_service_worker_identity_without_a_principal(self, lock_metric):
+    async def test_defaults_to_service_worker_identity_without_a_principal(
+        self, lock_metric
+    ):
         event = await record(make_session(head=make_head()), principal=None)
 
         assert event.actor_subject == "service:worker"
         assert event.actor_roles == ["service"]
 
     async def test_principal_supplies_subject_and_sorted_roles(self, lock_metric):
-        principal = make_principal(subject="bob", roles=frozenset({"zeta", "alpha", "mid"}))
+        principal = make_principal(
+            subject="bob", roles=frozenset({"zeta", "alpha", "mid"})
+        )
 
         event = await record(make_session(head=make_head()), principal=principal)
 
         assert event.actor_subject == "bob"
         assert event.actor_roles == ["alpha", "mid", "zeta"]
 
-    async def test_explicit_actor_fields_are_used_without_a_principal(self, lock_metric):
+    async def test_explicit_actor_fields_are_used_without_a_principal(
+        self, lock_metric
+    ):
         event = await record(
             make_session(head=make_head()),
             principal=None,
@@ -432,7 +457,9 @@ class TestRecordAuditEvent:
         assert sorted(event.actor_roles) == ["operator", "service"]
 
     async def test_empty_actor_roles_fall_back_to_service(self, lock_metric):
-        event = await record(make_session(head=make_head()), principal=None, actor_roles=[])
+        event = await record(
+            make_session(head=make_head()), principal=None, actor_roles=[]
+        )
 
         assert event.actor_roles == ["service"]
 
@@ -446,16 +473,23 @@ class TestRecordAuditEvent:
         )
 
         assert event.actor_subject == "delegate"
-        assert event.actor_roles == ["auditor", "reviewer"]  # roles still come from the principal
+        assert event.actor_roles == [
+            "auditor",
+            "reviewer",
+        ]  # roles still come from the principal
 
     # ---- field normalisation
-    async def test_default_outcome_is_success_and_custom_outcome_is_kept(self, lock_metric):
+    async def test_default_outcome_is_success_and_custom_outcome_is_kept(
+        self, lock_metric
+    ):
         session = make_session(head=make_head())
 
         assert (await record(session)).outcome == "success"
         assert (await record(session, outcome="failure")).outcome == "failure"
 
-    async def test_string_fields_are_truncated_to_their_column_widths(self, lock_metric):
+    async def test_string_fields_are_truncated_to_their_column_widths(
+        self, lock_metric
+    ):
         event = await record(
             make_session(head=make_head()),
             principal=make_principal(subject="s" * 400),
@@ -466,11 +500,22 @@ class TestRecordAuditEvent:
             outcome="o" * 100,
         )
 
+        assert event.actor_subject is not None
         assert len(event.actor_subject) == 255
+
+        assert event.request_id is not None
         assert len(event.request_id) == 64
+
+        assert event.action is not None
         assert len(event.action) == 120
+
+        assert event.resource_type is not None
         assert len(event.resource_type) == 80
+
+        assert event.resource_id is not None
         assert len(event.resource_id) == 128
+
+        assert event.outcome is not None
         assert len(event.outcome) == 40
 
     async def test_blank_request_and_resource_ids_become_none(self, lock_metric):
@@ -512,7 +557,9 @@ class TestRecordAuditEvent:
         assert first.id != second.id
 
     # ---- metadata handling
-    async def test_metadata_is_filtered_through_the_allow_list_before_persisting(self, lock_metric):
+    async def test_metadata_is_filtered_through_the_allow_list_before_persisting(
+        self, lock_metric
+    ):
         event = await record(
             make_session(head=make_head()),
             metadata={
@@ -525,7 +572,9 @@ class TestRecordAuditEvent:
 
         assert event.event_metadata == {"status": "completed", "count": 2}
         assert "TOP-SECRET" not in repr(event.event_metadata)
-        assert event.event_hash == recompute_hash(event)  # hash covers sanitised metadata only
+        assert event.event_hash == recompute_hash(
+            event
+        )  # hash covers sanitised metadata only
 
     async def test_missing_metadata_is_stored_as_an_empty_dict(self, lock_metric):
         event = await record(make_session(head=make_head()), metadata=None)
@@ -598,7 +647,9 @@ class TestVerifyAuditChain:
         assert result["valid"] is True
 
     # ---- sequence problems
-    async def test_missing_middle_event_is_reported_as_a_sequence_gap(self, lock_metric):
+    async def test_missing_middle_event_is_reported_as_a_sequence_gap(
+        self, lock_metric
+    ):
         rows = build_chain(3)
         tampered = [rows[0], rows[2]]  # event 2 deleted
         session = make_session(head=head_for(rows), rows=tampered)
@@ -621,7 +672,9 @@ class TestVerifyAuditChain:
 
     async def test_chain_that_does_not_start_at_one_is_detected(self, lock_metric):
         rows = build_chain(3)
-        session = make_session(head=head_for(rows), rows=rows[1:])  # first event deleted
+        session = make_session(
+            head=head_for(rows), rows=rows[1:]
+        )  # first event deleted
 
         result = await verify_audit_chain(session, tenant_id=TENANT)
 
@@ -672,7 +725,9 @@ class TestVerifyAuditChain:
             ("occurred_at", datetime(2030, 1, 1, tzinfo=UTC)),
         ],
     )
-    async def test_tampering_with_event_content_is_detected(self, field, new_value, lock_metric):
+    async def test_tampering_with_event_content_is_detected(
+        self, field, new_value, lock_metric
+    ):
         rows = build_chain(3)
         setattr(rows[1], field, new_value)
         session = make_session(head=head_for(rows), rows=rows)
@@ -726,7 +781,9 @@ class TestVerifyAuditChain:
         assert result["failure_reason"] == "chain_head_mismatch"
         assert result["first_failure_sequence"] == 4
 
-    async def test_head_hash_not_matching_the_last_event_is_a_head_mismatch(self, lock_metric):
+    async def test_head_hash_not_matching_the_last_event_is_a_head_mismatch(
+        self, lock_metric
+    ):
         rows = build_chain(3)
         head = make_head(last_sequence=3, last_hash="e" * 64)
         session = make_session(head=head, rows=rows)
@@ -736,7 +793,9 @@ class TestVerifyAuditChain:
         assert result["failure_reason"] == "chain_head_mismatch"
         assert result["head_hash"] == "e" * 64
 
-    async def test_non_genesis_head_with_no_events_is_a_head_mismatch(self, lock_metric):
+    async def test_non_genesis_head_with_no_events_is_a_head_mismatch(
+        self, lock_metric
+    ):
         head = make_head(last_sequence=2, last_hash="a" * 64)
         session = make_session(head=head, rows=[])
 
@@ -766,7 +825,9 @@ class TestVerifyAuditChain:
         assert result["event_count"] == 0
         assert result["head_hash"] == GENESIS_HASH
 
-    async def test_event_level_failure_takes_precedence_over_head_mismatch(self, lock_metric):
+    async def test_event_level_failure_takes_precedence_over_head_mismatch(
+        self, lock_metric
+    ):
         rows = build_chain(3)
         rows[0].action = "tampered"
         bad_head = make_head(last_sequence=99, last_hash="9" * 64)
@@ -778,7 +839,9 @@ class TestVerifyAuditChain:
         assert result["first_failure_sequence"] == 1
 
     # ---- query / transaction behaviour
-    async def test_verification_runs_in_a_repeatable_read_nested_transaction(self, lock_metric):
+    async def test_verification_runs_in_a_repeatable_read_nested_transaction(
+        self, lock_metric
+    ):
         session = make_session(head=make_head(), rows=[])
 
         await verify_audit_chain(session, tenant_id=TENANT)
@@ -787,7 +850,9 @@ class TestVerifyAuditChain:
         first_statement = session.execute.await_args_list[0].args[0]
         assert "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ" in str(first_statement)
 
-    async def test_genesis_head_is_initialised_with_the_unmodified_tenant_id(self, lock_metric):
+    async def test_genesis_head_is_initialised_with_the_unmodified_tenant_id(
+        self, lock_metric
+    ):
         session = make_session(head=make_head(), rows=[])
 
         await verify_audit_chain(session, tenant_id=TENANT)
@@ -818,7 +883,9 @@ class TestVerifyAuditChain:
 
         assert result["tenant_id"] == "another-tenant"
 
-    async def test_nothing_is_written_or_committed_during_verification(self, lock_metric):
+    async def test_nothing_is_written_or_committed_during_verification(
+        self, lock_metric
+    ):
         rows = build_chain(2)
         session = make_session(head=head_for(rows), rows=rows)
 
@@ -829,7 +896,9 @@ class TestVerifyAuditChain:
 
     # ---- lock timing metric
     async def test_lock_duration_is_recorded_as_success(self, lock_metric):
-        await verify_audit_chain(make_session(head=make_head(), rows=[]), tenant_id=TENANT)
+        await verify_audit_chain(
+            make_session(head=make_head(), rows=[]), tenant_id=TENANT
+        )
 
         lock_metric.assert_called_once()
         args, kwargs = lock_metric.call_args
@@ -860,20 +929,26 @@ class TestListAuditEvents:
         assert count == 57
 
     async def test_items_are_returned_as_a_list(self):
-        session = make_list_session((SimpleNamespace(id=1),), count=1)  # a tuple from the driver
+        session = make_list_session(
+            (SimpleNamespace(id=1),), count=1
+        )  # a tuple from the driver
 
         items, _ = await list_audit_events(session, tenant_id=TENANT)
 
         assert isinstance(items, list)
 
     async def test_empty_result_returns_empty_list_and_zero(self):
-        items, count = await list_audit_events(make_list_session([], 0), tenant_id=TENANT)
+        items, count = await list_audit_events(
+            make_list_session([], 0), tenant_id=TENANT
+        )
 
         assert items == []
         assert count == 0
 
     async def test_missing_count_is_coerced_to_zero(self):
-        _, count = await list_audit_events(make_list_session([], None), tenant_id=TENANT)
+        _, count = await list_audit_events(
+            make_list_session([], None), tenant_id=TENANT
+        )
 
         assert count == 0
         assert isinstance(count, int)
@@ -912,7 +987,10 @@ class TestListAuditEvents:
 
         await list_audit_events(session, tenant_id="tenant-b", action="screening.read")
 
-        for statement in (session.scalars.await_args.args[0], session.scalar.await_args.args[0]):
+        for statement in (
+            session.scalars.await_args.args[0],
+            session.scalar.await_args.args[0],
+        ):
             sql = sql_of(statement)
             assert "tenant-b" in sql
             assert "tenant-a" not in sql
@@ -923,7 +1001,9 @@ class TestListAuditEvents:
 
         await list_audit_events(session, tenant_id=hostile)
 
-        compiled = session.scalars.await_args.args[0].compile(dialect=postgresql.dialect())
+        compiled = session.scalars.await_args.args[0].compile(
+            dialect=postgresql.dialect()
+        )
         assert hostile not in str(compiled)
         assert hostile in compiled.params.values()
 
@@ -932,7 +1012,10 @@ class TestListAuditEvents:
 
         await list_audit_events(session, tenant_id=TENANT, action="screening.read")
 
-        for statement in (session.scalars.await_args.args[0], session.scalar.await_args.args[0]):
+        for statement in (
+            session.scalars.await_args.args[0],
+            session.scalar.await_args.args[0],
+        ):
             sql = sql_of(statement)
             assert "audit_events.action = 'screening.read'" in sql
             assert f"audit_events.tenant_id = '{TENANT}'" in sql
@@ -943,7 +1026,10 @@ class TestListAuditEvents:
 
         await list_audit_events(session, tenant_id=TENANT, action=action)
 
-        for statement in (session.scalars.await_args.args[0], session.scalar.await_args.args[0]):
+        for statement in (
+            session.scalars.await_args.args[0],
+            session.scalar.await_args.args[0],
+        ):
             assert "audit_events.action =" not in sql_of(statement)
 
     async def test_count_query_counts_rows_rather_than_loading_them(self):

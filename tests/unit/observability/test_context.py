@@ -27,7 +27,9 @@ def test_unknown_field_raises_so_typos_cannot_widen_what_is_logged():
 
 
 def test_values_are_single_line_bounded_and_blank_becomes_unset():
-    bind_context(tenant_id="acme\nINFO forged line\r\x00", screening_id="x" * 500, task_id="   ")
+    bind_context(
+        tenant_id="acme\nINFO forged line\r\x00", screening_id="x" * 500, task_id="   "
+    )
     fields = context_fields()
     assert "\n" not in fields["tenant_id"] and "\r" not in fields["tenant_id"]
     assert len(fields["screening_id"]) == 128
@@ -37,7 +39,11 @@ def test_values_are_single_line_bounded_and_blank_becomes_unset():
 def test_scope_inherits_overrides_and_restores():
     bind_context(request_id="outer", tenant_id="t1")
     with context_scope(tenant_id="t2", task_id="job") as inner:
-        assert inner.as_dict() == {"request_id": "outer", "tenant_id": "t2", "task_id": "job"}
+        assert inner.as_dict() == {
+            "request_id": "outer",
+            "tenant_id": "t2",
+            "task_id": "job",
+        }
         bind_context(screening_id="s1")
     assert context_fields() == {"request_id": "outer", "tenant_id": "t1"}
 

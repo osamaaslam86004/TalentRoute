@@ -15,12 +15,16 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("screenings", sa.Column("idempotency_key", sa.String(length=128), nullable=True))
     op.add_column(
-        "screenings", sa.Column("request_fingerprint", sa.String(length=64), nullable=True)
+        "screenings", sa.Column("idempotency_key", sa.String(length=128), nullable=True)
     )
     op.add_column(
-        "screenings", sa.Column("processing_started_at", sa.DateTime(timezone=True), nullable=True)
+        "screenings",
+        sa.Column("request_fingerprint", sa.String(length=64), nullable=True),
+    )
+    op.add_column(
+        "screenings",
+        sa.Column("processing_started_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index(
         "uq_screenings_tenant_idempotency",
@@ -32,24 +36,37 @@ def upgrade() -> None:
 
     op.create_table(
         "outbox_events",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False
+        ),
         sa.Column("tenant_id", sa.String(length=128), nullable=False),
         sa.Column("event_type", sa.String(length=120), nullable=False),
         sa.Column("aggregate_id", sa.String(length=128), nullable=False),
         sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-        sa.Column("status", sa.String(length=20), nullable=False, server_default="pending"),
+        sa.Column(
+            "status", sa.String(length=20), nullable=False, server_default="pending"
+        ),
         sa.Column("attempt_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column(
-            "available_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+            "available_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
         ),
         sa.Column("locked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("dispatched_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_error_code", sa.String(length=80), nullable=True),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
         ),
     )
     op.create_index("ix_outbox_events_tenant_id", "outbox_events", ["tenant_id"])
@@ -57,7 +74,9 @@ def upgrade() -> None:
     op.create_index(
         "ix_outbox_events_status_available", "outbox_events", ["status", "available_at"]
     )
-    op.create_index("ix_outbox_events_tenant_created", "outbox_events", ["tenant_id", "created_at"])
+    op.create_index(
+        "ix_outbox_events_tenant_created", "outbox_events", ["tenant_id", "created_at"]
+    )
 
 
 def downgrade() -> None:

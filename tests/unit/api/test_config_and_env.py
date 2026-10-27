@@ -1,4 +1,3 @@
-### File: tests/unit/api/test_config_and_env.py
 """Unit tests for app.core.config Settings and environmental configuration matrix.
 
 Tests cover:
@@ -11,7 +10,9 @@ Tests cover:
 from __future__ import annotations
 
 import unittest
+
 import pytest
+from pydantic import SecretStr, ValidationError
 
 from app.core.config import Settings
 
@@ -21,7 +22,7 @@ class TestConfigAndEnvironmentMatrix(unittest.TestCase):
 
     def test_settings_default_development_configuration(self) -> None:
         """Verify default settings initialization in development mode."""
-        settings = Settings(_env_file=None, environment="development")
+        settings = Settings(environment="development")
 
         self.assertEqual(settings.environment, "development")
         self.assertEqual(settings.log_level, "INFO")
@@ -35,22 +36,20 @@ class TestConfigAndEnvironmentMatrix(unittest.TestCase):
         """Verify valid environment literals are accepted by Settings."""
         for env in ("development", "test", "staging", "production"):
             settings = Settings(
-                _env_file=None,
                 environment=env,
-                api_key="sample_key",
+                api_key=SecretStr("sample_key"),
             )
             self.assertEqual(settings.environment, env)
 
     def test_fastapi_docs_visibility_in_development_vs_production(self) -> None:
         """Verify Swagger docs URL is enabled in development/test and disabled in production."""
-        dev_settings = Settings(_env_file=None, environment="development")
+        dev_settings = Settings(environment="development")
         self.assertEqual(dev_settings.environment, "development")
 
         prod_settings = Settings(
-            _env_file=None,
             environment="production",
             auth_mode="api_key",
-            api_key="sample_key",
+            api_key=SecretStr("sample_key"),
         )
         self.assertEqual(prod_settings.environment, "production")
 
@@ -58,28 +57,29 @@ class TestConfigAndEnvironmentMatrix(unittest.TestCase):
     def test_settings_log_format_options(self) -> None:
         """Verify valid log_format options ('console' and 'json')."""
         for fmt in ("console", "json"):
-            settings = Settings(_env_file=None, log_format=fmt)
+            settings = Settings(log_format=fmt)
             self.assertEqual(settings.log_format, fmt)
 
     def test_settings_invalid_log_format_raises_validation_error(self) -> None:
         """Verify unsupported log_format values raise ValueError or ValidationError."""
-        with self.assertRaises(Exception):
-            Settings(_env_file=None, log_format="invalid_xml")
+        with self.assertRaises((ValueError, ValidationError)):
+            Settings(log_format="invalid_xml")  # type: ignore[arg-type]
 
     def test_settings_oidc_auth_mode_missing_required_urls_raises(self) -> None:
         """Verify auth_mode='oidc' requires complete issuer, audience, and jwks_url."""
-        with self.assertRaises(Exception) as ctx:
+        with self.assertRaises((ValueError, ValidationError)) as ctx:
             Settings(
-                _env_file=None,
                 auth_mode="oidc",
                 oidc_issuer="https://localhost/issuer",
             )
-        self.assertIn("OIDC_ISSUER, OIDC_AUDIENCE, and OIDC_JWKS_URL are required", str(ctx.exception))
+        self.assertIn(
+            "OIDC_ISSUER, OIDC_AUDIENCE, and OIDC_JWKS_URL are required",
+            str(ctx.exception),
+        )
 
     def test_settings_oidc_auth_mode_valid_configuration(self) -> None:
         """Verify complete OIDC configuration passes validation."""
         settings = Settings(
-            _env_file=None,
             auth_mode="oidc",
             oidc_issuer="https://localhost/issuer",
             oidc_audience="screening-api",
@@ -90,9 +90,8 @@ class TestConfigAndEnvironmentMatrix(unittest.TestCase):
 
     def test_settings_api_key_auth_mode_missing_key_raises(self) -> None:
         """Verify auth_mode='api_key' requires an explicit api_key."""
-        with self.assertRaises(Exception) as ctx:
+        with self.assertRaises((ValueError, ValidationError)) as ctx:
             Settings(
-                _env_file=None,
                 auth_mode="api_key",
                 api_key=None,
             )
@@ -100,9 +99,8 @@ class TestConfigAndEnvironmentMatrix(unittest.TestCase):
 
     def test_settings_production_http_oidc_url_raises(self) -> None:
         """Verify non-HTTPS OIDC URLs raise validation error in production environment."""
-        with self.assertRaises(Exception) as ctx:
+        with self.assertRaises((ValueError, ValidationError)) as ctx:
             Settings(
-                _env_file=None,
                 environment="production",
                 auth_mode="oidc",
                 oidc_issuer="http://localhost/issuer",
@@ -113,21 +111,24 @@ class TestConfigAndEnvironmentMatrix(unittest.TestCase):
 
     def test_settings_invalid_oidc_algorithms_raises(self) -> None:
         """Verify symmetric or unsupported signing algorithms raise validation error."""
-        with self.assertRaises(Exception) as ctx:
+        with self.assertRaises((ValueError, ValidationError)) as ctx:
             Settings(
-                _env_file=None,
-                oidc_algorithms="HS256",
+                oidc_algorithms="HS256",  # type: ignore[arg-type]
             )
-        self.assertIn("OIDC_ALGORITHMS must contain only supported asymmetric signing algorithms", str(ctx.exception))
+        self.assertIn(
+            "OIDC_ALGORITHMS must contain only supported asymmetric signing algorithms",
+            str(ctx.exception),
+        )
 
     def test_settings_parse_csv_lists_helper(self) -> None:
         """Verify comma-separated string input is parsed into a list of strings."""
         settings = Settings(
-            _env_file=None,
-            cors_origins="http://localhost:3000, http://localhost:8080",
-            oidc_algorithms="RS256, ES256",
+            cors_origins="http://localhost:3000, http://localhost:8080",  # type: ignore[arg-type]
+            oidc_algorithms="RS256, ES256",  # type: ignore[arg-type]
         )
-        self.assertEqual(settings.cors_origins, ["http://localhost:3000", "http://localhost:8080"])
+        self.assertEqual(
+            settings.cors_origins, ["http://localhost:3000", "http://localhost:8080"]
+        )
         self.assertEqual(settings.oidc_algorithms, ["RS256", "ES256"])
 
 

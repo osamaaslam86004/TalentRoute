@@ -1,16 +1,19 @@
 """Unit tests for database declarative base, UUID primary keys, timestamp mixins, and tenant isolation."""
+
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
+
 import pytest
 from sqlalchemy import Column, String, select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.db.base import Base
-from app.db.mixins import TimestampMixin, UUIDPrimaryKeyMixin, TenantIsolationMixin
+from app.db.mixins import TenantIsolationMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class DummyModel(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantIsolationMixin):
     """Concrete model stub used to test structural mixins."""
+
     __tablename__ = "dummy_models"
     name = Column(String(100), nullable=False)
 
@@ -22,7 +25,9 @@ async def in_memory_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    session_maker = async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
     yield session_maker
 
     async with engine.begin() as conn:
@@ -34,7 +39,9 @@ async def in_memory_db():
 async def test_model_mixins_generation(in_memory_db):
     """Verify that UUID generation, timestamps, and tenant attributes populate correctly on commit."""
     async with in_memory_db() as session:
-        dummy = DummyModel(name="Candidate Review Workflow", tenant_id="tenant_alpha_01")
+        dummy = DummyModel(
+            name="Candidate Review Workflow", tenant_id="tenant_alpha_01"
+        )
         session.add(dummy)
         await session.commit()
         await session.refresh(dummy)

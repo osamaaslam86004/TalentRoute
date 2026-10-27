@@ -51,7 +51,9 @@ class TelemetryContext:
     def update(self, **values: Any) -> None:
         unknown = set(values).difference(CONTEXT_FIELDS)
         if unknown:
-            raise TypeError(f"unknown telemetry context field(s): {', '.join(sorted(unknown))}")
+            raise TypeError(
+                f"unknown telemetry context field(s): {', '.join(sorted(unknown))}"
+            )
         for key, value in values.items():
             setattr(self, key, _clean(value))
 
@@ -66,7 +68,9 @@ class TelemetryContext:
         return result
 
 
-_current: ContextVar[TelemetryContext | None] = ContextVar("telemetry_context", default=None)
+_current: ContextVar[TelemetryContext | None] = ContextVar(
+    "telemetry_context", default=None
+)
 
 
 def current_context() -> TelemetryContext | None:

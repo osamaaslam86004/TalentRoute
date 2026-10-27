@@ -130,7 +130,9 @@ class JsonFormatter(logging.Formatter):
         self._scrub_exceptions = scrub_exceptions
 
     def format(self, record: logging.LogRecord) -> str:
-        timestamp = datetime.fromtimestamp(record.created, UTC).isoformat(timespec="milliseconds")
+        timestamp = datetime.fromtimestamp(record.created, UTC).isoformat(
+            timespec="milliseconds"
+        )
         payload: dict[str, Any] = {
             "timestamp": timestamp.replace("+00:00", "Z"),
             "level": record.levelname,
@@ -159,7 +161,9 @@ class JsonFormatter(logging.Formatter):
         if record.stack_info and not self._scrub_exceptions:
             payload["stack"] = self.formatStack(record.stack_info)
 
-        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
+        return json.dumps(
+            payload, ensure_ascii=False, separators=(",", ":"), default=str
+        )
 
 
 class ConsoleFormatter(logging.Formatter):
@@ -244,7 +248,10 @@ def configure_logging(
     if role == "api" and settings.log_format == "json":
         _route_uvicorn_through_root()
 
-    if settings.log_format == "console" and settings.environment in _SCRUBBED_ENVIRONMENTS:
+    if (
+        settings.log_format == "console"
+        and settings.environment in _SCRUBBED_ENVIRONMENTS
+    ):
         logging.getLogger(__name__).warning(
             "LOG_FORMAT=console in %s: exception messages are not scrubbed; use LOG_FORMAT=json",
             settings.environment,

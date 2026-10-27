@@ -34,7 +34,9 @@ class ScreeningCreateRequest(BaseModel):
         deduped = list(dict.fromkeys(v.strip() for v in values if v.strip()))
 
         if not deduped:
-            raise ValueError("required_skills must contain at least one non-blank skill")
+            raise ValueError(
+                "required_skills must contain at least one non-blank skill"
+            )
 
         return deduped
 

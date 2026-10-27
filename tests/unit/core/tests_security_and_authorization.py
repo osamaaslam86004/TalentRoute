@@ -1,4 +1,3 @@
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import jwt
@@ -22,8 +21,9 @@ def test_principal_admin_role_bypass():
     principal = Principal(
         subject="admin-1",
         tenant_id="tenant-a",
-        roles=["admin"],
-        permissions=[],
+        roles=frozenset(["admin"]),
+        scopes=frozenset(),
+        auth_method="oidc",
     )
     assert principal.can("any:permission") is True
     assert principal.can("screening:write") is True
@@ -33,8 +33,9 @@ def test_principal_explicit_permission():
     principal = Principal(
         subject="user-1",
         tenant_id="tenant-a",
-        roles=["reviewer"],
-        permissions=["screening:read", "screening:write"],
+        roles=frozenset(["reviewer"]),
+        scopes=frozenset(["screening:read", "screening:write"]),
+        auth_method="oidc",
     )
     assert principal.can("screening:read") is True
     assert principal.can("screening:write") is True
@@ -46,8 +47,9 @@ def test_principal_role_mapped_permissions():
     reviewer_principal = Principal(
         subject="rev-1",
         tenant_id="tenant-a",
-        roles=["reviewer"],
-        permissions=[],
+        roles=frozenset(["user"]),
+        scopes=frozenset(["*"]),
+        auth_method="oidc",
     )
     assert reviewer_principal.can("screening:read") is True
     assert reviewer_principal.can("review:write") is True
@@ -56,8 +58,9 @@ def test_principal_role_mapped_permissions():
     auditor_principal = Principal(
         subject="aud-1",
         tenant_id="tenant-a",
-        roles=["auditor"],
-        permissions=[],
+        roles=frozenset(["user"]),
+        scopes=frozenset(["*"]),
+        auth_method="oidc",
     )
     assert auditor_principal.can("audit:read") is True
     assert auditor_principal.can("review:write") is False
@@ -67,8 +70,8 @@ def test_principal_wildcard_bypass_for_api_key_and_dev():
     api_key_principal = Principal(
         subject="key-1",
         tenant_id="tenant-a",
-        roles=["service"],
-        permissions=["*"],
+        roles=frozenset(["user"]),
+        scopes=frozenset(["*"]),
         auth_method="api_key",
     )
     assert api_key_principal.can("anything") is True
@@ -76,8 +79,8 @@ def test_principal_wildcard_bypass_for_api_key_and_dev():
     dev_principal = Principal(
         subject="dev-user",
         tenant_id="local-dev",
-        roles=["developer"],
-        permissions=["*"],
+        roles=frozenset(["user"]),
+        scopes=frozenset(["*"]),
         auth_method="development",
     )
     assert dev_principal.can("anything") is True
@@ -86,8 +89,8 @@ def test_principal_wildcard_bypass_for_api_key_and_dev():
     oidc_wildcard_principal = Principal(
         subject="user-oidc",
         tenant_id="tenant-a",
-        roles=["user"],
-        permissions=["*"],
+        roles=frozenset(["user"]),
+        scopes=frozenset(["*"]),
         auth_method="oidc",
     )
     assert oidc_wildcard_principal.can("screening:read") is False
@@ -99,11 +102,15 @@ def test_principal_wildcard_bypass_for_api_key_and_dev():
 
 
 def test_claim_strings_handling():
-    assert _claim_strings(["read", "write"]) == ["read", "write"]
-    assert _claim_strings("read write  delete ") == ["read", "write", "delete"]
-    assert _claim_strings("read, write,delete") == ["read", "write", "delete"]
-    assert _claim_strings(None) == []
-    assert _claim_strings(12345) == []
+    assert _claim_strings(["read", "write"]) == frozenset(["read", "write"])
+    assert _claim_strings("read write  delete ") == frozenset(
+        ["read", "write", "delete"]
+    )
+    assert _claim_strings("read, write,delete") == frozenset(
+        ["read", "write", "delete"]
+    )
+    assert _claim_strings(None) == frozenset()
+    assert _claim_strings(12345) == frozenset()
 
 
 # -----------------------------------------------------------------------------
@@ -115,7 +122,7 @@ def test_claim_strings_handling():
 async def test_decode_oidc_token_missing_settings(make_settings):
     settings = make_settings(auth_mode="oidc", oidc_jwks_url=None)
     with pytest.raises(HTTPException) as exc_info:
-        await _decode_oidc_token("some.token.here", settings)
+        _decode_oidc_token("some.token.here", settings)
     assert exc_info.value.status_code == 503
     assert "OIDC configuration" in exc_info.value.detail
 
@@ -130,7 +137,7 @@ async def test_decode_oidc_token_oversized(make_settings):
     )
     oversized_token = "a" * 16385
     with pytest.raises(HTTPException) as exc_info:
-        await _decode_oidc_token(oversized_token, settings)
+        _decode_oidc_token(oversized_token, settings)
     assert exc_info.value.status_code == 401
     assert "Oversized token" in exc_info.value.detail
 
@@ -148,7 +155,7 @@ async def test_decode_oidc_token_invalid_jwt(make_settings):
             jwt.PyJWTError("Invalid token")
         )
         with pytest.raises(HTTPException) as exc_info:
-            await _decode_oidc_token("invalid.jwt.token", settings)
+            _decode_oidc_token("invalid.jwt.token", settings)
         assert exc_info.value.status_code == 401
 
 
@@ -170,7 +177,7 @@ async def test_decode_oidc_token_missing_subject_or_tenant(make_settings):
         patch("jwt.decode", return_value=payload_no_sub),
     ):
         with pytest.raises(HTTPException) as exc_info:
-            await _decode_oidc_token("valid.token.payload", settings)
+            _decode_oidc_token("valid.token.payload", settings)
         assert exc_info.value.status_code == 403
         assert "subject" in exc_info.value.detail.lower()
 
@@ -181,7 +188,7 @@ async def test_decode_oidc_token_missing_subject_or_tenant(make_settings):
         patch("jwt.decode", return_value=payload_no_tenant),
     ):
         with pytest.raises(HTTPException) as exc_info:
-            await _decode_oidc_token("valid.token.payload", settings)
+            _decode_oidc_token("valid.token.payload", settings)
         assert exc_info.value.status_code == 403
         assert "tenant" in exc_info.value.detail.lower()
 
@@ -208,12 +215,12 @@ async def test_decode_oidc_token_success_and_scope_canonicalization(make_setting
         patch("jwt.PyJWKClient.get_signing_key_from_jwt", return_value=mock_key),
         patch("jwt.decode", return_value=payload),
     ):
-        principal = await _decode_oidc_token("valid.token.payload", settings)
+        principal = _decode_oidc_token("valid.token.payload", settings)
         assert principal.subject == "user-456"
         assert principal.tenant_id == "tenant-xyz"
         assert principal.roles == ["reviewer"]
-        assert "screening:read" in principal.permissions
-        assert "review:write" in principal.permissions
+        assert "screening:read" in principal.scopes
+        assert "review:write" in principal.scopes
 
 
 # -----------------------------------------------------------------------------
@@ -235,8 +242,9 @@ async def test_get_principal_oidc_bearer_token(make_settings):
     expected_principal = Principal(
         subject="user-1",
         tenant_id="tenant-1",
-        roles=["user"],
-        permissions=["screening:read"],
+        roles=frozenset(["user"]),
+        scopes=frozenset(["screening:read"]),
+        auth_method="oidc",
     )
 
     with patch(
@@ -311,8 +319,9 @@ async def test_require_permission_dependency_success():
     principal = Principal(
         subject="user-1",
         tenant_id="tenant-a",
-        roles=["reviewer"],
-        permissions=["screening:read"],
+        roles=frozenset(["reviewer"]),
+        scopes=frozenset(["screening:read"]),
+        auth_method="oidc",
     )
     dependency = require_permission("screening:read")
     res = await dependency(principal=principal)
@@ -324,8 +333,9 @@ async def test_require_permission_dependency_forbidden():
     principal = Principal(
         subject="user-1",
         tenant_id="tenant-a",
-        roles=["reviewer"],
-        permissions=["screening:read"],
+        roles=frozenset(["reviewer"]),
+        scopes=frozenset(["screening:read"]),
+        auth_method="oidc",
     )
     dependency = require_permission("audit:read")
     with pytest.raises(HTTPException) as exc_info:

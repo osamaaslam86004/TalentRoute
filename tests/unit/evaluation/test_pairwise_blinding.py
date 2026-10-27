@@ -104,7 +104,9 @@ class TestPublicResponseAnonymization(unittest.TestCase):
 
         self.assertNotIn("unapproved_secret", public)
         self.assertNotIn("applicant_name", public)
-        self.assertEqual(set(public.keys()), {"experience_level", "skills_match", "recommendation"})
+        self.assertEqual(
+            set(public.keys()), {"experience_level", "skills_match", "recommendation"}
+        )
 
 
 class TestCreateBlindedPairs(unittest.TestCase):
@@ -209,13 +211,21 @@ class TestCreateBlindedPairs(unittest.TestCase):
             if mapping["swap_applied"]:
                 self.assertEqual(mapping["candidate_a_version"], "v2.0")
                 self.assertEqual(mapping["candidate_b_version"], "v1.0")
-                self.assertEqual(task["candidate_a"]["experience_level"], orig_b["experience_level"])
-                self.assertEqual(task["candidate_b"]["experience_level"], orig_a["experience_level"])
+                self.assertEqual(
+                    task["candidate_a"]["experience_level"], orig_b["experience_level"]
+                )
+                self.assertEqual(
+                    task["candidate_b"]["experience_level"], orig_a["experience_level"]
+                )
             else:
                 self.assertEqual(mapping["candidate_a_version"], "v1.0")
                 self.assertEqual(mapping["candidate_b_version"], "v2.0")
-                self.assertEqual(task["candidate_a"]["experience_level"], orig_a["experience_level"])
-                self.assertEqual(task["candidate_b"]["experience_level"], orig_b["experience_level"])
+                self.assertEqual(
+                    task["candidate_a"]["experience_level"], orig_a["experience_level"]
+                )
+                self.assertEqual(
+                    task["candidate_b"]["experience_level"], orig_b["experience_level"]
+                )
 
     def test_create_blinded_pairs_with_review_context(self) -> None:
         """Verify pre-approved review context is included when requested."""
@@ -245,7 +255,9 @@ class TestCreateBlindedPairs(unittest.TestCase):
                 candidate_b_version="v2.0",
                 include_review_context=True,
             )
-        self.assertIn("Review context mismatch for case_id=case_001", str(ctx.exception))
+        self.assertIn(
+            "Review context mismatch for case_id=case_001", str(ctx.exception)
+        )
 
     def test_create_blinded_pairs_missing_or_non_string_case_id_raises(self) -> None:
         """Verify invalid or non-string case_id raises ValueError."""
@@ -259,7 +271,10 @@ class TestCreateBlindedPairs(unittest.TestCase):
                 candidate_a_version="v1.0",
                 candidate_b_version="v2.0",
             )
-        self.assertIn("Each pairwise prediction row must have a unique string case_id", str(ctx.exception))
+        self.assertIn(
+            "Each pairwise prediction row must have a unique string case_id",
+            str(ctx.exception),
+        )
 
     def test_create_blinded_pairs_duplicate_case_id_raises(self) -> None:
         """Verify duplicate case_id in input raises ValueError."""
@@ -272,7 +287,10 @@ class TestCreateBlindedPairs(unittest.TestCase):
                 candidate_a_version="v1.0",
                 candidate_b_version="v2.0",
             )
-        self.assertIn("Each pairwise prediction row must have a unique string case_id", str(ctx.exception))
+        self.assertIn(
+            "Each pairwise prediction row must have a unique string case_id",
+            str(ctx.exception),
+        )
 
     def test_create_blinded_pairs_no_shared_case_ids_raises(self) -> None:
         """Verify exception when candidates share no case IDs."""
@@ -286,7 +304,9 @@ class TestCreateBlindedPairs(unittest.TestCase):
                 candidate_a_version="v1.0",
                 candidate_b_version="v2.0",
             )
-        self.assertIn("Candidate files do not contain a shared case_id", str(ctx.exception))
+        self.assertIn(
+            "Candidate files do not contain a shared case_id", str(ctx.exception)
+        )
 
 
 class TestScoreBlindedJudgments(unittest.TestCase):
@@ -326,8 +346,14 @@ class TestScoreBlindedJudgments(unittest.TestCase):
         ]
 
         public_tasks = [
-            {"pair_id": "p1", "judgment": {"winner": "a", "reason_code": "better_evidence"}},  # wins model_v1
-            {"pair_id": "p2", "judgment": {"winner": "a", "reason_code": "clearer_summary"}},  # wins model_v2 (swapped)
+            {
+                "pair_id": "p1",
+                "judgment": {"winner": "a", "reason_code": "better_evidence"},
+            },  # wins model_v1
+            {
+                "pair_id": "p2",
+                "judgment": {"winner": "a", "reason_code": "clearer_summary"},
+            },  # wins model_v2 (swapped)
             {"pair_id": "p3", "judgment": {"winner": "tie"}},
             {"pair_id": "p4", "judgment": {"winner": "both_bad"}},
         ]
@@ -360,7 +386,9 @@ class TestScoreBlindedJudgments(unittest.TestCase):
         self.assertEqual(result["completed_pairs"], 1)
         self.assertEqual(result["mapping_missing_pair_ids"], ["p_ghost"])
 
-    def test_score_blinded_judgments_skips_invalid_or_missing_winner_codes(self) -> None:
+    def test_score_blinded_judgments_skips_invalid_or_missing_winner_codes(
+        self,
+    ) -> None:
         """Verify invalid or unpopulated winner fields are skipped."""
         private_mapping = [
             {

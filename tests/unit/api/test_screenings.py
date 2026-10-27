@@ -15,10 +15,11 @@ validation errors (422), rate limiting, Idempotency-Key handling (replay vs 409 
 
 from __future__ import annotations
 
-import uuid
 import unittest
-import pytest
+import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 
