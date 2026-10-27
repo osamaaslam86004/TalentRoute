@@ -51,9 +51,56 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ruff]
-line-length = 100
-target-version = "py311"
+# Target Python version matching your environment
+target-version = "py310"
+line-length = 88
+
+# Exclude common build, cache, and virtual environment directories
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "venv",
+]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
-ignore = ["E501"]
+# Select popular and robust rule sets:
+# E/F: Pyflakes & pycodestyle (Errors & Code Style)
+# I: isort (Import Sorting)
+# UP: pyupgrade (Modernize Python syntax)
+# B: flake8-bugbear (Catch common design bugs/gotchas)
+# SIM: flake8-simplify (Simplify code structures)
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+# Ignore specific rules if they conflict with your preference
+ignore = [
+    "E501",  # Line length handled by the Ruff formatter automatically
+    "B008",  # Do not perform function calls in argument defaults (common FastAPI Depends() pattern)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Allow unused imports and relative import issues in Django/FastAPI setup files or migrations
+"**/migrations/*.py" = ["F401", "E501"]
+"__init__.py" = ["F401"]
+
+[tool.ruff.format]
+# Enable preview style formatting if you want cutting-edge formatting features
+preview = false
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
