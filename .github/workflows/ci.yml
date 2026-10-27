@@ -17,7 +17,7 @@ jobs:
           cache: pip
       - run: python -m pip install -e '.[dev]'
       - name: Run observability privacy canary tests
-        run: pytest -v tests/observability/test_telemetry_privacy.py
+        run: pytest -v tests/unit/observability/test_telemetry_privacy.py
 
   test:
     name: Test Suite
@@ -31,6 +31,6 @@ jobs:
       - run: python -m pip install -e '.[dev]'
       - run: ruff check app tests migrations
       - name: Run observability privacy canary tests
-        run: pytest -v tests/observability/test_telemetry_privacy.py
+        run: pytest -v tests/unit/observability/test_telemetry_privacy.py
       - name: Run full test suite
         run: pytest -q
