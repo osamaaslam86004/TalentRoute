@@ -23,11 +23,17 @@ def create_screening_graph(provider: AssessmentProvider | None = None):
         return {"skills_assessment": assessment}
 
     def route_app(state: ScreeningState) -> str:
-        skill_assessment = state["skills_assessment"]
-        if skill_assessment.match == SkillMatch.MATCH:
+        skill_assessment = state.get("skills_assessment")
+        if skill_assessment and skill_assessment.match == SkillMatch.MATCH:
             return "hr_review"
-        if state["experience_assessment"].level.value == "Senior-level":
+
+        experience_assessment = state.get("experience_assessment")
+        if (
+            experience_assessment
+            and experience_assessment.level.value == "Senior-level"
+        ):
             return "recruiter_review"
+
         return "manual_review"
 
     def hr_review(_: ScreeningState) -> dict:
@@ -54,13 +60,13 @@ def create_screening_graph(provider: AssessmentProvider | None = None):
             "human_review_required": True,
         }
 
-    graph = StateGraph(ScreeningState)
+    graph = StateGraph(state_schema=ScreeningState)
 
     graph.add_node("categorize_experience", categorize_experience)
     graph.add_node("assess_skillset", assess_skillset)
-    graph.add_node("hr_review", hr_review)
-    graph.add_node("recruiter_review", recruiter_review)
-    graph.add_node("manual_review", manual_review)
+    graph.add_node("hr_review", hr_review)  # type: ignore[arg-type]
+    graph.add_node("recruiter_review", recruiter_review)  # type: ignore[arg-type]
+    graph.add_node("manual_review", manual_review)  # type: ignore[arg-type]
     graph.add_edge(START, "categorize_experience")
     graph.add_edge("categorize_experience", "assess_skillset")
 
