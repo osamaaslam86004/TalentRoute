@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncGenerator, Callable
-from unittest.mock import AsyncMock, MagicMock, patch
+from collections.abc import AsyncGenerator, Callable
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
