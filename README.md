@@ -1,202 +1,472 @@
 # LangGraph Candidate Screening Service
 
-An asynchronous FastAPI service that turns the original LangGraph notebook into a structured, auditable **decision-support** workflow. This implementation adds tenant-scoped OIDC/RBAC, privacy-safe audit events, pre-provider PII minimization, append-only human-review/appeal records, model/prompt provenance, and offline evaluation with blinded pairwise review tools.
+An asynchronous, enterprise-grade FastAPI service that transforms candidate resume screening into a structured, auditable, evidence-focused **decision-support** workflow. This implementation adds tenant-scoped OIDC/RBAC authentication, privacy-safe audit trails, pre-provider PII minimization, append-only human-review and appeal records, prompt/model provenance tracking, and an offline evaluation pipeline with blinded pairwise review tooling.
 
-**Human review is mandatory.** The service never automatically rejects applicants, makes a hiring decision, schedules an interview, or sends candidate communications. Do not use this output as the sole basis for employment decisions.
+> **Mandatory Compliance & Safety Notice:**  
+> **Human review is strictly mandatory.** The service never automatically rejects applicants, makes a hiring decision, schedules interviews, or sends candidate communications. Outputs are advisory decision-support materials designed solely for qualified human reviewers. Do not use this output as the sole basis for employment decisions.
 
-## Architecture
+---
+
+## Architecture Overview
 
 ```text
-Client
-  | OIDC bearer token (preferred) or X-API-Key fallback
-  v
-FastAPI / RBAC / tenant boundary
-  |-- PostgreSQL: screenings, hash-chained audit, reviewer feedback, transactional outbox
-  |-- Redis: shared rate limit + Celery broker
-  |-- Celery Beat -> outbox dispatcher -> Celery worker
-                                         |-- conservative PII minimization
-                                         |-- LangGraph -> LangChain/provider
-                                         |-- prompt/model provenance + processing audit event
+                                +---------------------------------------+
+                                |  Client (HTTP API Consumer / UI)      |
+                                +---------------------------------------+
+                                                    |
+                         OIDC Bearer Token (preferred) or X-API-Key Fallback
+                                                    v
+                                +---------------------------------------+
+                                |  FastAPI / RBAC / Tenant Boundary     |
+                                +---------------------------------------+
+                                                    |
+            +---------------------------------------+---------------------------------------+
+            |                                       |                                       |
+            v                                       v                                       v
++-----------------------+               +-----------------------+               +-----------------------+
+|  PostgreSQL Database  |               |     Redis Service     |               | Celery Beat Scheduler |
+|  - Screenings         |               |  - Shared Rate Limit  |               +-----------------------+
+|  - Hash-Chained Audit |               |  - Celery Broker      |                           |
+|  - Review Feedback    |               +-----------------------+                           |
+|  - Transaction Outbox |                           ^                                       v
++-----------------------+                           |                           +-----------------------+
+            ^                                       +---------------------------| Outbox Dispatcher     |
+            |                                                                   +-----------------------+
+            |                                                                               |
+            +-------------------------------------------------------------------------------+
+                                                    v
+                                        +-----------------------+
+                                        | Celery Worker Node    |
+                                        |  - PII Minimization   |
+                                        |  - LangGraph Pipeline |
+                                        |  - Audit Event Logging|
+                                        +-----------------------+
+                                                    |
+                                                    v
+                                        +-----------------------+
+                                        |  LLM Provider (OpenAI)|
+                                        +-----------------------+
 ```
 
-- **FastAPI / Pydantic v2:** validated REST endpoints.
-- **PostgreSQL / SQLAlchemy 2 async / Alembic:** durable screening records and versioned schema migrations.
-- **Redis / Celery:** asynchronous assessment work with a PostgreSQL transactional outbox, retry/backoff, lease recovery, and a dedicated Celery Beat process.
-- **Submission controls:** tenant/actor-scoped Redis rate limiting, optional `Idempotency-Key` replay protection, request fingerprint conflict detection, and stale-worker recovery.
-- **LangGraph / LangChain:** structured evidence-focused assessment; all recommendations go to a human-review queue.
-- **OIDC/JWT + RBAC:** signature verification using a cached JWKS client, issuer/audience/expiry validation, role/scope checks, and tenant isolation on screening, review, and audit reads.
-- **Audit trail:** per-tenant sequence numbers, SHA-256 hash chaining, allow-listed metadata, integrity verification, and a PostgreSQL mutation guard.
-- **PII minimization:** configurable redaction before any provider request; the original application text remains in the restricted database for authorized human review.
-- **Quality pipeline:** versioned synthetic starter dataset, schema/agreement/latency/cost and evidence-grounding proxy metrics, confidence intervals, slice reports, conservative report comparison, and blinded A/B review artifacts.
+### Core Architecture Components
 
-## Quick start with Docker Compose
+* **FastAPI & Pydantic v2:** Fully async RESTful API endpoints with strict input normalization, request validation, and schema enforcement.
+* **PostgreSQL / SQLAlchemy 2.0 Async / Alembic:** Durable persistence layer with async connection pooling, strict relational integrity, and versioned Alembic schema migrations (`0001_initial`, `0002_enterprise_features`, `0003_outbox_idempotency`).
+* **Redis & Celery Outbox Worker:** Asynchronous background assessment processing utilizing a PostgreSQL transactional outbox pattern to eliminate dual-write risks. Includes automatic lease recovery, exponential backoff retries, dead-letter queueing, and a dedicated Celery Beat outbox dispatcher.
+* **Submission Controls & Idempotency:** Tenant/actor-scoped Redis Lua rate limiting, request fingerprinting, `Idempotency-Key` replay protection, and stale-worker claim recovery.
+* **LangGraph & LangChain Pipeline:** Structured evidence extraction and skill matching workflows with structured Pydantic outputs (`ExperienceAssessment`, `SkillsAssessment`). All workflows route candidates to a mandatory human-review queue (`hr_review`, `recruiter_review`, or `manual_review`).
+* **OIDC/JWT & RBAC Security:** Cryptographic token verification using a cached JWKS client (`PyJWKClient`), issuer/audience/expiration validation, tenant claim enforcement, constant-time API key fallback (`hmac.compare_digest`), and fine-grained action permissions.
+* **Tamper-Evident Audit Trail:** Append-only, per-tenant sequence numbers linked by SHA-256 hash chains. Protected by PostgreSQL database triggers preventing row updates or deletions, allow-listed metadata projection, and cryptographic chain verification endpoints (`/api/v1/audit-events/integrity`).
+* **PII Minimization Engine:** Configurable pre-provider regex redaction engine (`baseline` vs. `strict` policies) masking emails, phone numbers, government IDs, and labelled names/addresses prior to provider dispatch while retaining raw text in isolated database storage for authorized human review.
+* **Offline Evaluation & Release Pipeline:** Synthetic starter evaluation datasets, exact label agreement metrics with bootstrap 95% confidence intervals, role-family slice analysis, lexical evidence grounding proxies, confidence calibration diagnostics (ECE, Brier score), conservative release gate comparisons, and blinded A/B review generation tools.
+* **Full Observability Stack:** Vendor-neutral OpenTelemetry instrumentation (RED metrics, trace context propagation), structured JSON logging with privacy guardrails, Prometheus alert rules (`screening-alerts.yml`), and Grafana monitoring dashboards.
 
-1. Copy `.env.example` to `.env`.
-2. Change `API_KEY`, `POSTGRES_PASSWORD`, and `REDIS_PASSWORD` for a private development stack. Do not use the example credentials in a shared deployment.
-3. Add an LLM provider key to `.env`. Do not commit secrets.
-4. Run:
+---
 
-   ```bash
-   docker compose up --build -d
-   docker compose logs -f api worker beat
-   ```
+## Quick Start with Docker Compose
 
-5. Browse `http://localhost:8000/docs` in development. The API docs are disabled in production mode.
+### Prerequisites
+* Docker Engine 24.0+ & Docker Compose v2.20+
+* An active OpenAI API key (or compatible LLM provider)
 
-The Compose file injects service-local PostgreSQL and Redis URLs. A separately deployed stack must supply its own `DATABASE_URL`, `REDIS_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND` values. Run Alembic migrations before serving requests.
-
-## Local development
-
-Requires Python 3.11+, PostgreSQL, and Redis. For a local process (rather than Compose), set database/broker hostnames to `localhost` in `.env`.
+### 1. Environment Setup
+Copy the example environment file and configure required secrets:
 
 ```bash
-python -m venv .venv
-# Windows PowerShell: .venv\Scripts\Activate.ps1
-# Linux/macOS/WSL: source .venv/bin/activate
-python -m pip install -e .
-cp .env.example .env  # PowerShell: Copy-Item .env.example .env
-alembic upgrade head
-uvicorn app.main:app --reload
-# In a second terminal after activating the same environment:
-celery -A app.workers.celery_app:celery_app worker --loglevel=INFO
-# In another terminal, run the durable outbox dispatcher schedule:
+cp .env.example .env
+```
+
+Edit `.env` to configure your runtime credentials:
+* Set `OPENAI_API_KEY` to your provider key.
+* Update `API_KEY`, `POSTGRES_PASSWORD`, and `REDIS_PASSWORD` for private development stacks. Never deploy example credentials to shared environments.
+
+### 2. Launch the Application Stack
+Start the core services (PostgreSQL, Redis, FastAPI API, Celery Worker, Celery Beat):
+
+```bash
+docker compose up --build -d
+```
+
+View application logs in real-time:
+
+```bash
+docker compose logs -f api worker beat
+```
+
+### 3. Launch with Complete Observability
+To spin up the service alongside the OpenTelemetry Collector, Prometheus, and Grafana:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build -d
+```
+
+### 4. Interactive API Documentation
+In `development` or `test` mode, interactive OpenAPI documentation is available at:
+* Swagger UI: `http://localhost:8000/docs`
+* OpenAPI Schema: `http://localhost:8000/openapi.json`
+
+*(Note: API documentation endpoints are automatically disabled when `ENVIRONMENT=production`.)*
+
+---
+
+## Local Development & Makefile Workflows
+
+### Prerequisites
+* Python 3.11+
+* Local PostgreSQL instance (or Docker container)
+* Local Redis instance (or Docker container)
+
+### Setup & Local Execution
+
+```bash
+# 1. Create and activate a Python virtual environment
+python3.11 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\Activate.ps1
+
+# 2. Install package in editable mode with development dependencies
+make install
+
+# 3. Configure local environment variables
+cp .env.example .env
+
+# 4. Apply Alembic database migrations
+make migrate
+
+# 5. Start the FastAPI development server
+make run
+
+# 6. In a second terminal, start the Celery worker
+make worker
+
+# 7. In a third terminal, start the Celery Beat outbox dispatcher
 celery -A app.workers.celery_app:celery_app beat --loglevel=INFO
 ```
 
-## Authentication and authorization
+### Makefile Reference
 
-`AUTH_MODE` supports:
+| Target | Command Executed | Description |
+| :--- | :--- | :--- |
+| `make install` | `python -m pip install -e '.[dev]'` | Install package in editable mode with dev dependencies |
+| `make test` | `pytest -q` | Run pytest test suite quietly |
+| `make lint` | `ruff check app tests migrations` | Run Ruff linter and static code analysis |
+| `make run` | `uvicorn app.main:app --reload` | Run FastAPI server with auto-reload |
+| `make worker` | `celery -A app.workers.celery_app:celery_app worker --loglevel=INFO` | Run Celery worker node |
+| `make migrate` | `alembic upgrade head` | Apply latest Alembic database migrations |
+| `make up` | `docker compose up --build -d` | Build and start core Docker Compose stack |
+| `make down` | `docker compose down` | Stop and remove core Docker Compose containers |
+| `make logs` | `docker compose logs -f api worker` | Stream logs for API and worker containers |
+| `make obs-up` | `docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build -d` | Launch stack with OTel Collector, Prometheus & Grafana |
+| `make obs-down` | `docker compose -f docker-compose.yml -f docker-compose.observability.yml down` | Stop and remove full observability stack |
 
-- `oidc`: requires `OIDC_ISSUER`, `OIDC_AUDIENCE`, and `OIDC_JWKS_URL`. JWTs are cryptographically verified; the implementation does not merely decode token payloads. Production requires HTTPS for issuer/JWKS URLs.
-- `api_key`: requires `API_KEY` and uses constant-time comparison. It is a simple single-tenant integration mode, not a replacement for a proper identity provider.
-- `auto`: accepts verified OIDC bearer tokens when OIDC is configured, otherwise uses the API-key fallback. An invalid provided bearer token is rejected instead of silently falling back to a key.
+---
 
-Configure `OIDC_ROLES_CLAIM`, `OIDC_SCOPES_CLAIM`, `OIDC_TENANT_CLAIM`, and `OIDC_ALGORITHMS` to match the identity provider. The default requires a `tenant_id` claim for OIDC tokens. Algorithms are limited to asymmetric signing algorithms. Do not accept tokens from arbitrary issuers or use a shared HMAC secret supplied by an untrusted client.
+## Authentication, Authorization & Security Controls
 
-| Permission         | Default role membership                               | Purpose                                       |
-| ------------------ | ----------------------------------------------------- | --------------------------------------------- |
-| `screening:write`  | `recruiter`, `service`                                | Submit work                                   |
-| `screening:read`   | `recruiter`, `reviewer`, `auditor`, `privacy_officer` | Read tenant-owned screening results           |
-| `screening:delete` | `privacy_officer`                                     | Delete screening/application data             |
-| `review:write`     | `reviewer`                                            | Submit a human review record                  |
-| `review:read`      | `reviewer`, `auditor`                                 | Read reviewer and appeal history              |
-| `review:appeal`    | `compliance_officer`                                  | Append an appeal outcome                      |
-| `audit:read`       | `auditor`                                             | Read tenant-scoped audit events               |
-| `evaluation:run`   | `model_evaluator`                                     | Reserved for authorized evaluation operations |
+Authentication is configured via `AUTH_MODE` in `.env`:
 
-The `admin` role has all permissions inside its token's tenant. OIDC scopes may independently grant a permission. Role and claim names should be coordinated with the identity provider. With API-key authentication, the principal is mapped to the `default` tenant; do not use that mode as a multi-tenant identity architecture.
+* **`oidc` (Preferred for Production):** Cryptographically verifies RSA/ECDSA signed JWTs against identity provider public keys fetched via a cached JWKS client (`PyJWKClient`). Validates `iss` (issuer), `aud` (audience), `exp` (expiration), `iat` (issued at), and tenant claim rules. In `production`, issuer and JWKS URLs must use HTTPS.
+* **`api_key`:** Validates incoming requests using constant-time string comparison (`hmac.compare_digest`) against `X-API-Key` headers. Suitable for single-tenant internal service integrations.
+* **`auto` (Default):** Accepts cryptographically verified OIDC bearer tokens when OIDC settings are present; falls back to `API_KEY` when configured. Unauthenticated requests in `development` or `test` environments fall back to a local admin principal.
 
-## API overview
+### Configuration Parameters
 
-All business endpoints require a principal with the appropriate role/scope.
+```bash
+AUTH_MODE=auto
+API_KEY=dev-only-change-me
+OIDC_ISSUER=https://identity.example.com/realms/candidate-screening
+OIDC_AUDIENCE=candidate-screening-api
+OIDC_JWKS_URL=https://identity.example.com/realms/candidate-screening/protocol/openid-connect/certs
+OIDC_ROLES_CLAIM=roles
+OIDC_SCOPES_CLAIM=scope
+OIDC_TENANT_CLAIM=tenant_id
+OIDC_REQUIRE_TENANT_CLAIM=true
+OIDC_ALGORITHMS=RS256
+```
 
-### Submit a screening
+### Role-Based Access Control (RBAC) Permission Matrix
 
-`POST /api/v1/screenings` returns `202 Accepted` and a poll URL. Include an optional stable `Idempotency-Key` (8-128 characters from letters, digits, `.`, `_`, `:`, or `-`) when a client may retry after a network timeout. The key is scoped to the authenticated tenant. Repeating the same key with the same normalized payload returns the existing screening; reusing that key with a different payload returns `409 Conflict`. Omitting the header preserves the non-idempotent legacy behavior.
+| Permission | Default Role Membership | Purpose & Scope |
+| :--- | :--- | :--- |
+| `screening:write` | `recruiter`, `service` | Submit new screening applications |
+| `screening:read` | `recruiter`, `reviewer`, `auditor`, `privacy_officer` | List and read tenant-scoped candidate screening records |
+| `screening:delete` | `privacy_officer` | Delete screening application records (data erasure) |
+| `review:write` | `reviewer` | Submit reviewer feedback records |
+| `review:read` | `reviewer`, `auditor` | Read reviewer feedback and appeal histories |
+| `review:appeal` | `compliance_officer` | Append appeal outcome records |
+| `audit:read` | `auditor` | Read tenant-scoped audit event logs and chain integrity |
+| `evaluation:run` | `model_evaluator` | Run offline evaluation pipeline benchmarks |
 
-Submission throughput is limited per tenant and authenticated subject by `SCREENING_RATE_LIMIT_REQUESTS` over `SCREENING_RATE_LIMIT_WINDOW_SECONDS`. If Redis is unavailable, submissions fail closed with `503` by default. `RATE_LIMIT_FAIL_OPEN=true` allows an operator to accept requests during a Redis outage, at the cost of bypassing the limit until Redis recovers.
+*(Note: Principals possessing the `admin` role or explicit matching OAuth2 scopes bypass role checks within their authenticated tenant.)*
 
+---
+
+## API Endpoint Reference
+
+All business endpoints require authentication and enforce multi-tenant data boundaries.
+
+### 1. Health & Readiness Probes
+
+#### Liveness Probe
+`GET /health/live`
+* **Status Codes:** `200 OK`
+* **Response Body:** `{"status": "alive"}`
+
+#### Readiness Probe
+`GET /health/ready`
+* **Checks:** Performs active query probes against PostgreSQL (`SELECT 1`) and Redis (`ping()`).
+* **Status Codes:** `200 OK` (when all probes pass) or `503 Service Unavailable` (when any component fails).
+* **Response Body:** `{"status": "ready", "database": "ok", "redis": "ok"}`
+
+---
+
+### 2. Screening Submissions & Management
+
+#### Submit Candidate Screening
+`POST /api/v1/screenings`
+* **Permission Required:** `screening:write`
+* **Headers:** Optional `Idempotency-Key` (8–128 characters matching `^[A-Za-z0-9._:-]{8,128}$`).
+* **Rate Limiting:** Governed by `SCREENING_RATE_LIMIT_REQUESTS` (default 30) per `SCREENING_RATE_LIMIT_WINDOW_SECONDS` (default 60s). Fails closed (`503 Service Unavailable`) on Redis outages unless `RATE_LIMIT_FAIL_OPEN=true`.
+* **Idempotency Rules:**
+  * Replaying an identical request payload with the same `Idempotency-Key` returns the cached `202 Accepted` response.
+  * Reusing an `Idempotency-Key` with a modified payload returns `409 Conflict`.
+* **Status Codes:** `202 Accepted` (Enqueued), `409 Conflict` (Key reuse mismatch), `413 Payload Too Large` (Exceeds `MAX_APPLICATION_CHARS`), `429 Too Many Requests`.
+
+##### Request Payload Example
 ```json
 {
-  "application_text": "Five years building Python APIs with FastAPI, PostgreSQL, and Docker.",
-  "job_title": "Python Backend Engineer",
-  "required_skills": ["Python", "FastAPI", "PostgreSQL", "Docker"]
+  "application_text": "Five years building Python backend APIs with FastAPI, PostgreSQL, AsyncIO, and Docker. Led microservice architecture and security hardening.",
+  "job_title": "Senior Python Engineer",
+  "required_skills": ["Python", "FastAPI", "PostgreSQL", "Docker", "AsyncIO"]
 }
 ```
 
-### Read results
-
-- `GET /api/v1/screenings?limit=50&offset=0` lists tenant-owned records.
-- `GET /api/v1/screenings/{screening_id}` returns status and structured evidence, recommendation for a **human-review queue**, model/prompt version, and redaction counts. Raw application text is not returned.
-- `DELETE /api/v1/screenings/{screening_id}` deletes the application record. The audit event is retained; associated feedback is detached from the screening through a nullable foreign key.
-
-### Reviewer feedback and appeals
-
-- `POST /api/v1/screenings/{screening_id}/feedback` appends a reviewer label, controlled reason codes, rubric version, and optional notes.
-- `GET /api/v1/screenings/{screening_id}/feedback` returns tenant-owned review history.
-- `POST /api/v1/reviews/{feedback_id}/appeals` appends an appeal outcome linked to the original feedback. It never overwrites the original reviewer decision or model output.
-
-Human labels include `agree`, `disagree`, `insufficient_evidence`, and `override_recommendation`. Appeal outcomes include `pending`, `upheld`, and `revised`. The database trigger rejects reviewer-feedback updates/deletes, except for the foreign-key detach when the screening itself is deleted; new appeal outcomes are separate linked rows. Reviewer notes can themselves contain sensitive data, so access must be restricted and retention defined. Audit metadata intentionally excludes notes.
-
-### Audit events and health
-
-- `GET /api/v1/audit-events?limit=100&offset=0&action=screening.read` requires audit permission.
-- `GET /api/v1/audit-events/integrity` verifies tenant sequence continuity, predecessor links, event hashes, and the stored chain head.
-- `GET /health/live` is a liveness check.
-- `GET /health/ready` checks database and Redis connectivity.
-
-Audit metadata is allow-listed; the service must never pass full application text, prompts, API keys, provider exception contents, or free-form notes into audit events. The PostgreSQL migration installs a trigger that rejects updates/deletes on `audit_events`. Hash chaining makes row alteration, deletion, or reordering detectable, but a database superuser can disable constraints or alter both events and the chain head. For stronger tamper evidence, periodically export signed head hashes to a separately controlled immutable store. The application role needs `SELECT`/`INSERT` on `audit_events` plus narrowly scoped `SELECT`/`INSERT`/`UPDATE` on `audit_chain_heads`; it should not have audit-table `UPDATE`, `DELETE`, or `TRUNCATE` privileges.
-
-## PII minimization
-
-The worker keeps the original source text in PostgreSQL for authorized reviewers but passes a redacted copy to the LLM. Configuration:
-
-- `PII_REDACTION_ENABLED=true` enables it.
-- `PII_REDACTION_POLICY=baseline` masks emails, common phone formats, labelled names/IDs/addresses and similar structured identifiers.
-- `PII_REDACTION_POLICY=strict` additionally catches more unlabelled street-address patterns, with higher false-positive risk.
-
-This is a conservative regex baseline, not guaranteed anonymization. It can miss unlabelled, multilingual, misspelled, or novel identifiers and may redact legitimate evidence. For regulated use, replace/augment it with a vetted NER pipeline, localization, human correction, and a documented false-positive/false-negative assessment. Use provider data-processing controls and regional routing as appropriate.
-
-## Offline evaluation and regression gates
-
-The repository includes synthetic, non-applicant fixtures in `datasets/`. Their starter labels are illustrative and must not be represented as a validated hiring benchmark. For production evaluation, use access-controlled, properly licensed/consented data with qualified human-reviewed labels and keep an untouched holdout set.
-
-A prediction JSONL row has `case_id`, `experience_level`, `skills_match`, `recommendation`, `experience_evidence`, and `skills_evidence`. Optional fields include `latency_ms`, `estimated_cost_usd`, `model_version`, `prompt_version`, and `judge_assessment`. See `datasets/schemas/evaluation_prediction.schema.json`.
-
-```bash
-# Score a saved candidate output file without calling a provider
-python scripts/evaluate_offline.py \
-  --dataset datasets/evaluation_v1.jsonl \
-  --predictions /secure/path/candidate.predictions.jsonl \
-  --model-version provider-model-id \
-  --prompt-version screening-prompts-v1.1.0 \
-  --output reports/candidate-report.json
-
-# Compare baseline and candidate reports; a failed gate returns exit code 2
-python scripts/compare_evaluations.py \
-  --baseline /secure/path/baseline-report.json \
-  --candidate reports/candidate-report.json \
-  --output reports/release-gate.json
+##### Response Payload Example (`202 Accepted`)
+```json
+{
+  "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "status": "queued",
+  "poll_url": "http://localhost:8000/api/v1/screenings/3fa85f64-5717-4562-b3fc-2c963f66afa6"
+}
 ```
 
-The evaluation report includes schema validity, exact label agreement against human-gold labels, bootstrap confidence intervals, role-family slices, a lexical evidence-grounding proxy, confidence-calibration diagnostics when confidence scores are provided, prediction distributions, and latency/cost summaries when supplied. Report-to-report release checks compare accuracy, schema validity, slice gaps, output-distribution shift, latency, cost, dataset version, and missing/extra cases. The lexical proxy is not proof of semantic grounding; confidence is explicitly a model estimate and calibration results are unreliable on small datasets. Slice gaps and small sample sizes need human interpretation. An LLM judge may be included in `judge_assessment` to compare judge outputs with human gold; judge agreement is diagnostic and never used as the gold standard. Release gates are conservative operational checks, not proof of fairness, legal compliance, or safe deployment. Passing them does not auto-promote a model or prompt.
+#### List Screenings
+`GET /api/v1/screenings?limit=50&offset=0`
+* **Permission Required:** `screening:read`
+* **Status Codes:** `200 OK`
+* **Response Body:** Paginated array of tenant-scoped screening summaries (`items`, `limit`, `offset`, `count`).
 
-### Blinded pairwise review
+#### Get Screening Detail
+`GET /api/v1/screenings/{screening_id}`
+* **Permission Required:** `screening:read`
+* **Status Codes:** `200 OK`, `404 Not Found` (if missing or owned by another tenant).
+* **Response Summary:** Returns assessment status, job title, required skills, model/prompt versions, structured evidence, and recommendation routing. Raw application text is intentionally omitted from read payloads.
 
-To produce anonymized A/B response tasks for reviewers:
+#### Delete Screening Data
+`DELETE /api/v1/screenings/{screening_id}`
+* **Permission Required:** `screening:delete`
+* **Status Codes:** `204 No Content`, `404 Not Found`
+* **Behavior:** Permanently deletes the candidate application row. Detaches associated reviewer feedback (`screening_id` set to `NULL` via foreign key `ON DELETE SET NULL`) while preserving audit logs.
+
+---
+
+### 3. Reviewer Feedback & Appeals
+
+#### Submit Reviewer Feedback
+`POST /api/v1/screenings/{screening_id}/feedback`
+* **Permission Required:** `review:write`
+* **Allowed Labels:** `agree`, `disagree`, `insufficient_evidence`, `override_recommendation`
+* **Allowed Reason Codes:** `evidence_missing`, `evidence_conflicts`, `role_requirement_mismatch`, `redaction_review_needed`, `policy_or_accessibility_concern`, `rubric_ambiguity`, `other`
+* **Status Codes:** `201 Created`, `404 Not Found`, `422 Unprocessable Entity`
+
+##### Request Payload Example
+```json
+{
+  "label": "disagree",
+  "reason_codes": ["evidence_missing", "role_requirement_mismatch"],
+  "notes": "Candidate work history shows Python experience, but lacks required async architecture evidence."
+}
+```
+
+#### List Review History
+`GET /api/v1/screenings/{screening_id}/feedback?limit=50&offset=0`
+* **Permission Required:** `review:read`
+* **Status Codes:** `200 OK`, `404 Not Found`
+
+#### Append Appeal Outcome
+`POST /api/v1/reviews/{feedback_id}/appeals`
+* **Permission Required:** `review:appeal`
+* **Allowed Outcomes:** `pending`, `upheld`, `revised`
+* **Status Codes:** `201 Created`, `404 Not Found`
+* **Immutability Principle:** Creates a new linked record (`record_type="appeal"`, `parent_feedback_id=<feedback_id>`). Original reviewer feedback records and model outputs are immutable and cannot be overwritten.
+
+---
+
+### 4. Audit Trail & Integrity Verification
+
+#### List Audit Events
+`GET /api/v1/audit-events?limit=100&offset=0&action=screening.created`
+* **Permission Required:** `audit:read`
+* **Status Codes:** `200 OK`
+
+#### Verify Audit Chain Integrity
+`GET /api/v1/audit-events/integrity`
+* **Permission Required:** `audit:read`
+* **Status Codes:** `200 OK`
+* **Response Payload Example:**
+```json
+{
+  "tenant_id": "default",
+  "valid": true,
+  "event_count": 42,
+  "head_sequence": 42,
+  "first_failure_sequence": null,
+  "failure_reason": null,
+  "head_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
+```
+
+---
+
+## PII Minimization Engine
+
+To protect candidate privacy, application text is passed through an automated regex-based PII minimization engine prior to sending data to external LLM providers. Original raw application text remains safely stored in PostgreSQL for authorized human reviewers.
+
+### Configuration
+```bash
+PII_REDACTION_ENABLED=true
+PII_REDACTION_POLICY=baseline  # Options: 'baseline' or 'strict'
+```
+
+### Redaction Policies
+
+* **`baseline` (Default):** Redacts structured PII identifiers:
+  * Emails (`[REDACTED_EMAIL]`)
+  * Phone numbers (`[REDACTED_PHONE]`)
+  * Government/Tax/Employee IDs (`[REDACTED_ID]`)
+  * Labelled applicant names (`[REDACTED_NAME]`)
+  * Labelled home/street addresses (`[REDACTED_ADDRESS]`)
+* **`strict`:** Applies all baseline rules plus unlabelled street address detection (e.g., `123 Main Street, Suite 400`).
+
+---
+
+## Operational & Evaluation CLI Scripts
+
+The `app/scripts/` directory provides operational and offline model evaluation utilities.
+
+### 1. Offline Model Evaluation
+Scores saved candidate predictions JSONL files against a versioned human-gold dataset without making provider network calls:
 
 ```bash
-python scripts/create_pairwise_review.py \
-  --candidate-a /secure/path/model_a.jsonl \
-  --candidate-b /secure/path/model_b.jsonl \
-  --candidate-a-version model-a-prompt-1 \
-  --candidate-b-version model-b-prompt-2 \
-  --public-output reports/blinded-review.json \
+python -m app.scripts.evaluate_offline \
+  --dataset datasets/evaluation_v1.jsonl \
+  --predictions predictions/candidate_model.jsonl \
+  --model-version gpt-4o-mini \
+  --prompt-version screening-prompts-v1.1.0 \
+  --output reports/candidate-eval.json
+```
+
+### 2. Conservative Release Gate Comparison
+Compares baseline and candidate evaluation reports against release thresholds (returns exit code `0` on pass, `2` on gate failure):
+
+```bash
+python -m app.scripts.compare_evaluations \
+  --baseline reports/baseline-eval.json \
+  --candidate reports/candidate-eval.json \
+  --max-accuracy-drop 0.03 \
+  --max-schema-drop 0.00 \
+  --max-slice-accuracy-gap 0.20 \
+  --max-distribution-shift 0.25 \
+  --max-latency-increase 0.25 \
+  --max-cost-increase 0.25 \
+  --output reports/release-gate-report.json
+```
+
+### 3. Create Blinded Pairwise Review Tasks
+Generates anonymized A/B review tasks for human reviewers while creating a restricted identity map:
+
+```bash
+python -m app.scripts.create_pairwise_review \
+  --candidate-a predictions/model_a.jsonl \
+  --candidate-b predictions/model_b.jsonl \
+  --candidate-a-version model-v1 \
+  --candidate-b-version model-v2 \
+  --public-output reports/blinded-review-tasks.json \
   --private-map-output .private/blinded-review-map.json
 ```
 
-Reviewers fill each `judgment.winner` with `a`, `b`, `tie`, or `both_bad`, and may fill a controlled `reason_code`. The private identity map is essential for unblinding and is excluded from version control. Share only the public artifact with reviewers; keep the map in a restricted evaluation workspace. If context is needed, provide a pre-approved redacted `review_context` in the input rows and pass `--include-review-context`. Then summarize judgments using `scripts/score_pairwise_review.py`.
+*(Note: The private identity map file is created with restricted `0o600` file permissions and excluded from version control.)*
 
-## Database migrations and worker behavior
+### 4. Score Blinded Pairwise Judgments
+Unblinds completed reviewer judgments using the private identity map and aggregates preference win rates:
 
 ```bash
+python -m app.scripts.score_pairwise_review \
+  --public-review reports/completed-blinded-review.json \
+  --private-map .private/blinded-review-map.json \
+  --output reports/pairwise-summary.json
+```
+
+### 5. Requeue Dead-Letter Outbox Events
+Operator utility for safely requeuing dead-letter outbox events after resolving systemic failures:
+
+```bash
+# Requeue a single dead-letter event by UUID
+python -m app.scripts.requeue_dead_outbox --event-id 3fa85f64-5717-4562-b3fc-2c963f66afa6
+
+# Batch requeue dead-letter events (up to limit)
+python -m app.scripts.requeue_dead_outbox --all-dead --limit 100
+```
+
+---
+
+## Database Migrations & Outbox Worker Mechanics
+
+### Alembic Schema Migrations
+Database migrations are managed via Alembic:
+
+```bash
+# Upgrade database to latest schema
 alembic upgrade head
 ```
 
-`0001_initial` creates the original screening table. `0002_enterprise_features` adds tenant/provenance/redaction fields and the audit/feedback tables. `0003_outbox_idempotency` adds optional submission idempotency and the transactional outbox. Run migrations as a controlled deployment step; review downgrade behavior with the database owner before production use.
+* **`0001_initial`:** Creates core `screenings` table.
+* **`0002_enterprise_features`:** Adds tenant scoping, model/prompt provenance fields, `reviewer_feedback`, `audit_events`, and `audit_chain_heads`.
+* **`0003_outbox_idempotency`:** Adds request fingerprinting, idempotency keys, and `outbox_events`.
 
-A screening record, audit event, and `screening.requested` outbox event commit in the same PostgreSQL transaction. The separate Celery Beat process dispatches pending events; leases recover claims after dispatcher crashes and bounded exponential backoff moves repeatedly failing events to `dead`. Inspect `outbox_events` operationally for `dead` rows and reconcile the cause before requeueing. To retry one event after fixing the cause, run `python scripts/requeue_dead_outbox.py --event-id <event-uuid>`; use `--all-dead --limit 100` only for an intentional batch retry. Broker delivery can be at-least-once, so consumers must remain idempotent. A duplicate worker task is ignored while the record is already running; a running record older than `STALE_PROCESSING_SECONDS` can be reclaimed after a worker crash.
+### Transactional Outbox Pattern
+When a screening is submitted, the business record (`screenings`), audit event (`audit_events`), and transactional outbox row (`outbox_events`) commit within the same PostgreSQL transaction.
 
-Error details stored on screening records are stable codes only. The task writes processing success/failure audit events without saving provider exception text. Redis and the broker should be reachable only on private networks and configured with strong credentials.
+1. **Dispatch:** A dedicated Celery Beat task (`dispatch_pending_outbox`) queries pending outbox records and enqueues worker tasks (`screen_candidate`).
+2. **Lease Recovery:** Claimed outbox rows acquire a lease lock (`locked_at`). Stale leases from crashed dispatchers are automatically recovered.
+3. **Dead-Letter Handling:** Events failing repeatedly increment `attempt_count`. Upon reaching `OUTBOX_MAX_ATTEMPTS` (default 12), the event transitions to `"dead"` status.
 
-## Observability and Monitoring
+---
 
-The service includes vendor-neutral OpenTelemetry instrumentation (metrics and traces) and structured JSON logging adhering to strict privacy guardrails (no applicant text or prompts in telemetry). Use `make obs-up` to launch local observability stack (Collector, Prometheus, Grafana).
+## Observability, Monitoring & Guardrails
 
-### Alerting and Runbooks
+The service exposes OpenTelemetry metrics and traces, integrated with Prometheus and Grafana (`make obs-up`).
 
-Prometheus alerts monitor dead-letter outboxes, audit chain validity, and 5xx error rates. Refer to `docs/observability.md` for complete operator runbooks and operational recovery commands.
+### Privacy Guardrails
+* **Zero Text in Telemetry:** Candidate application text, LLM prompts, provider response bodies, credentials, and reviewer notes are strictly forbidden from telemetry spans, metric labels, or log outputs.
+* **Keyed Actor Hashing:** User subjects are hashed with `TELEMETRY_HASH_SALT` before recording telemetry metrics.
 
-## Production hardening checklist
+### Prometheus Alert Rules
+Pre-configured alerts in `deploy/observability/alerts/screening-alerts.yml` monitor critical operational thresholds:
+* `HighOutboxDeadLetterCount`: Triggers when dead-letter outbox events accumulate.
+* `AuditChainIntegrityFailure`: Triggers when `app_audit_chain_valid == 0`.
+* `HighRateLimitDropRate`: Triggers when rate limiter drops spike.
+* `HighAPIErrorRate`: Triggers when HTTP 5xx error rates exceed 5%.
 
-Before production use, configure a managed OIDC provider and role mapping, TLS/mTLS where appropriate, secret-manager injection and rotation, non-default PostgreSQL/Redis credentials, database least-privilege grants, encrypted disks/backups, retention and deletion schedules, external logs/metrics/traces, queue depth and failure alerts, rate limits, request-size limits, disaster recovery, provider privacy terms, and jurisdiction-specific employment/AI/privacy legal review. Include human appeal and accessibility paths and audit disparate impact before using any model output in a consequential process.
+---
+
+## Production Hardening Checklist
+
+Before deploying this service to production environments:
+
+- [ ] **Identity Provider:** Configure a managed OIDC identity provider (e.g., Keycloak, Okta, Auth0) and verify HTTPS transport for issuer/JWKS URLs.
+- [ ] **Secret Management:** Inject secrets (`API_KEY`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `OPENAI_API_KEY`, `TELEMETRY_HASH_SALT`) via an enterprise secret manager.
+- [ ] **Database Least-Privilege:** Grant application database users `SELECT`, `INSERT`, and `UPDATE` permissions on `screenings`, `reviewer_feedback`, `outbox_events`, and `audit_chain_heads`. Restrict `DELETE` and `TRUNCATE` privileges.
+- [ ] **TLS & Network Isolation:** Enforce TLS for incoming API traffic and restrict Redis/PostgreSQL access to private VPC networks.
+- [ ] **Storage Encryption:** Enable at-rest disk encryption for PostgreSQL databases and backups.
+- [ ] **Observability & Alerts:** Deploy the OpenTelemetry collector and configure PagerDuty/Slack notification channels for Prometheus alerts.
+- [ ] **AI Ethics & Legal Compliance:** Review automated screening procedures with qualified legal counsel to ensure compliance with local employment and data privacy regulations.
