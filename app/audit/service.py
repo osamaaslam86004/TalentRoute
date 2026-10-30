@@ -179,9 +179,15 @@ async def verify_audit_chain(
     using a Repeatable Read snapshot to prevent race conditions without blocking concurrent appends.
     """
 
-    # Start a transaction with REPEATABLE READ isolation to ensure snapshot consistency.
+    # Start a nested transaction for snapshot consistency.
+    # REPEATABLE READ isolation is PostgreSQL-specific; SQLite (used in tests) does not
+    # support this SQL syntax, so we only issue it on non-SQLite dialects.
     async with session.begin_nested():
-        await session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
+        dialect_name = session.bind.dialect.name if session.bind else ""
+        if dialect_name not in ("sqlite",):
+            await session.execute(
+                text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            )
 
         await session.execute(
             text("""
@@ -237,7 +243,12 @@ async def verify_audit_chain(
 
             payload = audit_hash_payload(
                 event_id=str(event.id),
-                occurred_at=event.occurred_at,
+                # SQLite returns naive datetimes; normalise to UTC for hashing.
+                occurred_at=(
+                    event.occurred_at.replace(tzinfo=UTC)
+                    if event.occurred_at.tzinfo is None
+                    else event.occurred_at
+                ),
                 tenant_id=event.tenant_id,
                 actor_subject=event.actor_subject,
                 actor_roles=event.actor_roles,
