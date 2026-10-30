@@ -38,6 +38,7 @@ register_db_pool_listeners(engine)
 AsyncSessionLocal = async_sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False
 )
+async_session_maker = AsyncSessionLocal
 
 worker_engine = create_worker_engine()
 WorkerAsyncSessionLocal = async_sessionmaker(
@@ -47,20 +48,23 @@ WorkerAsyncSessionLocal = async_sessionmaker(
 
 def configure_worker_db() -> None:
     """Update database session and engine configuration to use NullPool for Celery workers."""
-    global engine, AsyncSessionLocal
+    global engine, AsyncSessionLocal, async_session_maker
     engine = worker_engine
     AsyncSessionLocal.configure(bind=worker_engine)
+    async_session_maker = AsyncSessionLocal
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency that yields an async database session, committing on success and rolling back on error."""
-    async with AsyncSessionLocal() as session:
+    async with async_session_maker() as session:
         try:
             yield session
             await session.commit()
         except Exception:
             await session.rollback()
             raise
+        finally:
+            await session.close()
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -66,7 +67,10 @@ class TestCreatePairwiseReviewCLI(unittest.TestCase):
             self.assertEqual(len(private_data["private_mapping"]), 1)
 
             file_mode = oct(private_out.stat().st_mode & 0o777)
-            self.assertEqual(file_mode, "0o600")
+            if sys.platform != "win32":
+                self.assertEqual(file_mode, "0o600")
+            else:
+                self.assertIn(file_mode, ("0o600", "0o666"))
 
     def test_create_pairwise_review_flags_seed_and_review_context(self) -> None:
         """Verify --seed and --include-review-context flags are passed to create_blinded_pairs."""

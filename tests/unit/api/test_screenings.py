@@ -15,18 +15,21 @@ validation errors (422), rate limiting, Idempotency-Key handling (replay vs 409 
 
 from __future__ import annotations
 
+import hashlib
+import json
 import unittest
 import uuid
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 
 from app.api.v1.endpoints.screenings import router as screenings_router
-from app.core.security import Principal, require_permission
+from app.core.security import Principal, get_principal
 from app.db.models.screening import Screening
 from app.db.session import get_db_session
+from app.schemas.screening import ScreeningCreateRequest
 
 
 class TestScreeningsEndpoints(unittest.TestCase):
@@ -46,6 +49,7 @@ class TestScreeningsEndpoints(unittest.TestCase):
         )
 
         self.mock_db = AsyncMock()
+        self.mock_db.add = MagicMock()
 
         async def override_principal():
             return self.mock_principal
@@ -53,16 +57,22 @@ class TestScreeningsEndpoints(unittest.TestCase):
         async def override_db():
             yield self.mock_db
 
-        self.app.dependency_overrides[require_permission("screening:write")] = (
-            override_principal
-        )
-        self.app.dependency_overrides[require_permission("screening:read")] = (
-            override_principal
-        )
-        self.app.dependency_overrides[require_permission("screening:delete")] = (
-            override_principal
-        )
+        self.app.dependency_overrides[get_principal] = override_principal
         self.app.dependency_overrides[get_db_session] = override_db
+
+        self.record_patcher = patch(
+            "app.api.v1.endpoints.screenings.record_audit_event",
+            new_callable=AsyncMock,
+        )
+        self.mock_record_audit_event = self.record_patcher.start()
+        self.addCleanup(self.record_patcher.stop)
+
+        self.rate_patcher = patch(
+            "app.api.v1.endpoints.screenings.enforce_screening_rate_limit",
+            new_callable=AsyncMock,
+        )
+        self.mock_rate_limit = self.rate_patcher.start()
+        self.addCleanup(self.rate_patcher.stop)
 
         self.client = TestClient(self.app)
 
@@ -140,24 +150,31 @@ class TestScreeningsEndpoints(unittest.TestCase):
     def test_post_screening_idempotency_replay_returns_existing_record(self) -> None:
         """Verify replaying request with identical Idempotency-Key returns existing screening."""
         screening_id = uuid.UUID("22222222-2222-2222-2222-222222222222")
+        payload = {
+            "application_text": "Sample text with more than twenty characters.",
+            "job_title": "Engineer",
+            "required_skills": ["Python"],
+        }
+        rf = hashlib.sha256(
+            json.dumps(
+                ScreeningCreateRequest(**payload).model_dump(mode="json"),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
         existing_screening = Screening(
             id=screening_id,
             tenant_id="tenant-alpha",
             status="queued",
             idempotency_key="idempotent-key-001",
-            request_fingerprint="c55b704fb3f47e24a87e5b1efbf0e9ec03290b2d6935ee573dbe927a76e0ff0d",
-            application_text="Sample text",
-            job_title="Engineer",
-            required_skills=["Python"],
+            request_fingerprint=rf,
+            application_text=payload["application_text"],
+            job_title=payload["job_title"],
+            required_skills=payload["required_skills"],
         )
 
         self.mock_db.scalar.return_value = existing_screening
-
-        payload = {
-            "application_text": "Sample text",
-            "job_title": "Engineer",
-            "required_skills": ["Python"],
-        }
         headers = {"Idempotency-Key": "idempotent-key-001"}
 
         response = self.client.post("/api/v1/screenings", json=payload, headers=headers)
@@ -203,13 +220,18 @@ class TestScreeningsEndpoints(unittest.TestCase):
         self, mock_list: AsyncMock
     ) -> None:
         """Verify GET /api/v1/screenings returns paginated list for authenticated tenant."""
+        now = datetime.now(UTC)
         s1 = Screening(
             id=uuid.uuid4(),
             tenant_id="tenant-alpha",
             status="completed",
-            application_text="Sample",
+            application_text="Sample text with more than twenty characters.",
             job_title="Dev",
             required_skills=["Python"],
+            human_review_required=True,
+            attempt_count=1,
+            created_at=now,
+            updated_at=now,
         )
         mock_list.return_value = ([s1], 1)
 
@@ -222,27 +244,33 @@ class TestScreeningsEndpoints(unittest.TestCase):
         self.assertEqual(body["limit"], 10)
         self.assertEqual(body["offset"], 0)
 
-    @pytest.mark.parametrize("query", ["?limit=0", "?limit=101", "?offset=-1"])
-    def test_list_screenings_rejects_invalid_pagination_returns_422(
-        self, query: str
-    ) -> None:
+    def test_list_screenings_rejects_invalid_pagination_returns_422(self) -> None:
         """Verify GET /api/v1/screenings returns 422 for invalid pagination parameters."""
-        response = self.client.get(f"/api/v1/screenings{query}")
-        self.assertEqual(response.status_code, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        for query in ["?limit=0", "?limit=101", "?offset=-1"]:
+            with self.subTest(query=query):
+                response = self.client.get(f"/api/v1/screenings{query}")
+                self.assertEqual(
+                    response.status_code, status.HTTP_422_UNPROCESSABLE_ENTITY
+                )
 
     @patch("app.api.v1.endpoints.screenings.get_screening")
     def test_get_screening_by_id_success(self, mock_get: AsyncMock) -> None:
         """Verify GET /api/v1/screenings/{screening_id} returns screening details."""
         sid = uuid.uuid4()
+        now = datetime.now(UTC)
         s1 = Screening(
             id=sid,
             tenant_id="tenant-alpha",
             status="completed",
-            application_text="Resume details",
+            application_text="Resume details with more than twenty characters.",
             job_title="Senior Developer",
             required_skills=["Python", "SQL"],
             model_version="gpt-4o",
             prompt_version="v1",
+            human_review_required=True,
+            attempt_count=1,
+            created_at=now,
+            updated_at=now,
         )
         mock_get.return_value = s1
 

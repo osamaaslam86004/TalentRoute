@@ -78,6 +78,11 @@ class TestScreenCandidateTask(unittest.TestCase):
         """Set up test UUID and mock task context."""
         self.screening_id = uuid.uuid4()
         self.screening_id_str = str(self.screening_id)
+        self.task_fn = getattr(
+            getattr(screen_candidate, "__wrapped__", None),
+            "__func__",
+            screen_candidate,
+        )
 
     @patch("app.db.session.worker_engine")
     @patch("app.workers.tasks.process_screening")
@@ -88,7 +93,7 @@ class TestScreenCandidateTask(unittest.TestCase):
         mock_task_self = MagicMock()
         mock_task_self.request.delivery_info = {"redelivered": False}
 
-        res = screen_candidate(mock_task_self, self.screening_id_str)
+        res = self.task_fn(mock_task_self, self.screening_id_str)
 
         self.assertEqual(
             res, {"screening_id": self.screening_id_str, "status": "processed"}
@@ -107,7 +112,7 @@ class TestScreenCandidateTask(unittest.TestCase):
         mock_task_self = MagicMock()
         mock_task_self.request.delivery_info = {"redelivered": True}
 
-        res = screen_candidate(mock_task_self, self.screening_id_str)
+        res = self.task_fn(mock_task_self, self.screening_id_str)
 
         self.assertEqual(
             res, {"screening_id": self.screening_id_str, "status": "processed"}
@@ -129,7 +134,7 @@ class TestScreenCandidateTask(unittest.TestCase):
         mock_process.side_effect = RuntimeError("Database connection lost")
 
         with self.assertRaises(RuntimeError):
-            screen_candidate(mock_task_self, self.screening_id_str)
+            self.task_fn(mock_task_self, self.screening_id_str)
 
         mock_worker_engine.sync_engine.dispose.assert_called_once()
 

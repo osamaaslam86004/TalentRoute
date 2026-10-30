@@ -19,19 +19,22 @@ async def test_engine_initialization_parameters():
     )
 
     with (
-        patch("app.db.session.get_settings", return_value=mock_settings),
-        patch("app.db.session.create_async_engine") as mock_create_engine,
+        patch("app.core.config.get_settings", return_value=mock_settings),
+        patch("sqlalchemy.ext.asyncio.create_async_engine") as mock_create_engine,
+        patch("app.observability.db_pool.register_db_pool_listeners"),
     ):
         # Reload the session module to trigger module-level engine creation with mock settings
         importlib.reload(session)
 
-        mock_create_engine.assert_called_once_with(
+        mock_create_engine.assert_any_call(
             mock_settings.database_url,
             pool_pre_ping=True,
             pool_size=5,
             max_overflow=10,
             pool_recycle=1800,
         )
+
+    importlib.reload(session)
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,7 @@ from fastapi import FastAPI, status
 from fastapi.testclient import TestClient
 
 from app.api.v1.endpoints.reviews import router as reviews_router
-from app.core.security import Principal, require_permission
+from app.core.security import Principal, get_principal
 from app.db.models.reviewer_feedback import ReviewerFeedback
 from app.db.models.screening import Screening
 from app.db.session import get_db_session
@@ -49,16 +49,14 @@ class TestReviewsAndAppealsEndpoints(unittest.TestCase):
         async def override_db():
             yield self.mock_db
 
-        self.app.dependency_overrides[require_permission("review:write")] = (
-            override_principal
-        )
-        self.app.dependency_overrides[require_permission("review:read")] = (
-            override_principal
-        )
-        self.app.dependency_overrides[require_permission("review:appeal")] = (
-            override_principal
-        )
+        self.app.dependency_overrides[get_principal] = override_principal
         self.app.dependency_overrides[get_db_session] = override_db
+
+        self.record_patcher = patch(
+            "app.api.v1.endpoints.reviews.record_audit_event", new_callable=AsyncMock
+        )
+        self.mock_record_audit_event = self.record_patcher.start()
+        self.addCleanup(self.record_patcher.stop)
 
         self.client = TestClient(self.app)
 

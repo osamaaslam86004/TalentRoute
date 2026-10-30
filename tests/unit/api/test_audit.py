@@ -15,7 +15,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from app.api.v1.endpoints.audit import router as audit_router
-from app.core.security import Principal, require_permission
+from app.core.security import Principal, get_principal
 from app.db.models.audit_event import AuditEvent
 from app.db.session import get_db_session
 from app.main import app
@@ -147,10 +147,14 @@ class TestAuditEndpoints(unittest.TestCase):
         async def override_db():
             yield self.mock_db
 
-        self.app.dependency_overrides[require_permission("audit:read")] = (
-            override_principal
-        )
+        self.app.dependency_overrides[get_principal] = override_principal
         self.app.dependency_overrides[get_db_session] = override_db
+
+        self.record_patcher = patch(
+            "app.api.v1.endpoints.audit.record_audit_event", new_callable=AsyncMock
+        )
+        self.mock_record_audit_event = self.record_patcher.start()
+        self.addCleanup(self.record_patcher.stop)
 
         self.client = TestClient(self.app)
 
@@ -163,17 +167,17 @@ class TestAuditEndpoints(unittest.TestCase):
         event_item = AuditEvent(
             id=event_id,
             tenant_id="tenant-alpha",
-            sequence_number=1,
+            sequence_no=1,
             action="screening.created",
-            actor_hash="hashed_actor_123",
+            actor_subject="auditor-789",
+            actor_roles=["auditor"],
             resource_type="screening",
             resource_id="res-001",
             outcome="success",
             event_metadata={"status": "queued"},
-            payload_hash="payload_sha256_hash",
-            prev_event_hash="0000000000000000000000000000000000000000000000000000000000000000",
+            previous_hash="0" * 64,
             event_hash="computed_event_hash_001",
-            created_at=datetime.now(UTC),
+            occurred_at=datetime.now(UTC),
         )
         mock_list_audit_events.return_value = ([event_item], 1)
 
@@ -213,8 +217,10 @@ class TestAuditEndpoints(unittest.TestCase):
             "valid": True,
             "tenant_id": "tenant-alpha",
             "event_count": 10,
-            "last_verified_sequence": 10,
-            "error_detail": None,
+            "head_sequence": 10,
+            "first_failure_sequence": None,
+            "failure_reason": None,
+            "head_hash": "0" * 64,
         }
 
         response = self.client.get("/api/v1/audit-events/integrity")
@@ -234,8 +240,10 @@ class TestAuditEndpoints(unittest.TestCase):
             "valid": False,
             "tenant_id": "tenant-alpha",
             "event_count": 5,
-            "last_verified_sequence": 3,
-            "error_detail": "Hash mismatch at sequence 4",
+            "head_sequence": 5,
+            "first_failure_sequence": 4,
+            "failure_reason": "Hash mismatch at sequence 4",
+            "head_hash": "a" * 64,
         }
 
         response = self.client.get("/api/v1/audit-events/integrity")
@@ -243,7 +251,7 @@ class TestAuditEndpoints(unittest.TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         body = response.json()
         self.assertFalse(body["valid"])
-        self.assertEqual(body["error_detail"], "Hash mismatch at sequence 4")
+        self.assertEqual(body["failure_reason"], "Hash mismatch at sequence 4")
 
 
 if __name__ == "__main__":

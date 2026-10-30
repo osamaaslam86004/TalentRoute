@@ -19,6 +19,7 @@ from app.db.session import (
 async def test_get_db_success():
     """Verify that get_db yields an active session, commits upon success, and closes properly."""
     mock_session = AsyncMock()
+    mock_session.__aenter__.return_value = mock_session
     mock_session_maker = MagicMock(return_value=mock_session)
 
     with patch("app.db.session.async_session_maker", mock_session_maker):
@@ -37,13 +38,15 @@ async def test_get_db_success():
 async def test_get_db_exception_triggers_rollback():
     """Verify that get_db rolls back the transaction and closes session when an exception occurs."""
     mock_session = AsyncMock()
+    mock_session.__aenter__.return_value = mock_session
     mock_session_maker = MagicMock(return_value=mock_session)
 
     with patch("app.db.session.async_session_maker", mock_session_maker):
+        gen = get_db()
+        session = await anext(gen)
+        assert session == mock_session
         with pytest.raises(ValueError, match="Database transaction error"):
-            async for session in get_db():
-                assert session == mock_session
-                raise ValueError("Database transaction error")
+            await gen.athrow(ValueError("Database transaction error"))
 
         # Verify rollback and close are executed, but commit is skipped
         mock_session.rollback.assert_awaited_once()
@@ -55,12 +58,14 @@ async def test_get_db_exception_triggers_rollback():
 async def test_get_db_sqlalchemy_error_rollback():
     """Verify rollback behavior when encountering a SQLAlchemy error."""
     mock_session = AsyncMock()
+    mock_session.__aenter__.return_value = mock_session
     mock_session_maker = MagicMock(return_value=mock_session)
 
     with patch("app.db.session.async_session_maker", mock_session_maker):
+        gen = get_db()
+        session = await anext(gen)
         with pytest.raises(SQLAlchemyError):
-            async for _session in get_db():
-                raise SQLAlchemyError("Integrity constraint violation")
+            await gen.athrow(SQLAlchemyError("Integrity constraint violation"))
 
         mock_session.rollback.assert_awaited_once()
         mock_session.close.assert_awaited_once()
@@ -70,6 +75,7 @@ async def test_get_db_sqlalchemy_error_rollback():
 async def test_get_db_session_success():
     """Verify that get_db_session yields an active session from AsyncSessionLocal."""
     mock_session = AsyncMock()
+    mock_session.__aenter__.return_value = mock_session
     mock_session_maker = MagicMock(return_value=mock_session)
 
     with patch("app.db.session.AsyncSessionLocal", mock_session_maker):
@@ -81,6 +87,7 @@ async def test_get_db_session_success():
 async def test_get_worker_session_success():
     """Verify that get_worker_session yields an active session from WorkerAsyncSessionLocal."""
     mock_session = AsyncMock()
+    mock_session.__aenter__.return_value = mock_session
     mock_session_maker = MagicMock(return_value=mock_session)
 
     with patch("app.db.session.WorkerAsyncSessionLocal", mock_session_maker):
