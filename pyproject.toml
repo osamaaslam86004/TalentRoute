@@ -45,6 +45,13 @@ dev = [
   "aiosqlite>=0.20,<1.0",
   "ruff>=0.17,<1.0",
 ]
+docs = [
+  "mkdocs>=1.6.1",
+  "mkdocs-material>=9.8.0",
+  "mkdocs-autorefs>=1.4.5",
+  "mkdocs-panzoom-plugin>=0.5.3",
+  "pymdown-extensions>=12.3",
+]
 
 [tool.setuptools.packages.find]
 include = ["app*"]
