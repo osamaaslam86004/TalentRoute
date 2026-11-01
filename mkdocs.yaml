@@ -1,0 +1,105 @@
+site_name: Candidate Screening Service Documentation
+site_description: Enterprise decision-support engine using FastAPI, LangGraph, PostgreSQL, and OpenTelemetry.
+site_author: Platform Engineering Team
+site_url: https://docs.screening-service.internal
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+
+plugins:
+  - search
+  - autorefs
+  - panzoom:
+      mermaid: true
+      images: true
+      full_screen: true
+      initial_zoom_level: 1.2
+      key: "ctrl"
+      hint_location: "top"
+      always_show_hint: true
+      exclude:
+        - getting-started/quickstart.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Overview: index.md
+  - Getting Started:
+      - Quickstart Guide: getting-started/quickstart.md
+      - Environment Setup: getting-started/configuration.md
+      - Authentication & Security: getting-started/authentication.md
+  - Architecture & Workflows:
+      - System Overview: architecture/overview.md
+      - LangGraph Screening Pipeline: architecture/langgraph-pipeline.md
+      - Transactional Outbox & Workers: architecture/outbox-workers.md
+      - PII Minimization Engine: architecture/pii-redaction.md
+      - Tamper-Evident Audit Chain: architecture/audit-chain.md
+  - API Reference:
+      - API Overview & Headers: api-reference/overview.md
+      - Screenings Endpoint: api-reference/screenings.md
+      - Reviewer Feedback & Appeals: api-reference/reviews.md
+      - Audit Verification: api-reference/audit.md
+  - Observability & Operations:
+      - Telemetry & RED Metrics: observability/telemetry.md
+      - Incident Runbooks: observability/runbooks.md
+  - Model Quality & Offline Evaluation:
+      - Pipeline Benchmark: evaluation/offline-evaluation.md
+      - Blinded A/B Pairwise Review: evaluation/blinded-review.md
