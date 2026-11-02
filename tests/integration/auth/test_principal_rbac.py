@@ -24,7 +24,7 @@ class TestClaimStrings:
 class TestPrincipalRBAC:
     """Tests for Principal.can() permission decision logic."""
 
-    def test_admin_role_escalation_grants_all_permissions() -> None:
+    def test_admin_role_escalation_grants_all_permissions(self) -> None:
         principal = Principal(
             subject="admin-user",
             tenant_id="tenant-alpha",
@@ -37,7 +37,7 @@ class TestPrincipalRBAC:
         assert principal.can("audit:read") is True
         assert principal.can("arbitrary:custom_permission") is True
 
-    def test_direct_scope_grant() -> None:
+    def test_direct_scope_grant(self) -> None:
         principal = Principal(
             subject="scoped-user",
             tenant_id="tenant-alpha",
@@ -48,7 +48,7 @@ class TestPrincipalRBAC:
         assert principal.can("screening:write") is True
         assert principal.can("screening:delete") is False
 
-    def test_wildcard_scope_for_api_key_and_dev_auth() -> None:
+    def test_wildcard_scope_for_api_key_and_dev_auth(self) -> None:
         api_key_principal = Principal(
             subject="api-key-client",
             tenant_id="default",

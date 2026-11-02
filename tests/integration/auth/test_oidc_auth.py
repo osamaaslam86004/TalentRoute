@@ -2,9 +2,9 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi import HTTPException
 from jwt.exceptions import PyJWKClientConnectionError, PyJWTError
-import pytest
 
 from app.auth.oidc_auth import decode_access_token
 from app.core.config import Settings
@@ -14,7 +14,7 @@ from app.core.security import Principal, _decode_oidc_token
 class TestOIDCAuthDecoding:
     """Security tests for OIDC token verification and mapping logic."""
 
-    def test_decode_token_unconfigured_oidc_raises_503() -> None:
+    def test_decode_token_unconfigured_oidc_raises_503(self) -> None:
         unconfigured_settings = Settings(
             auth_mode="auto",
             oidc_issuer=None,
@@ -23,15 +23,15 @@ class TestOIDCAuthDecoding:
         )
         with pytest.raises(HTTPException) as exc_info:
             _decode_oidc_token("some-token", unconfigured_settings)
+
         assert exc_info.value.status_code == 503
         assert "OIDC authentication is not configured" in exc_info.value.detail
 
-    def test_decode_oversized_token_raises_401(
-        self, mock_settings: Settings
-    ) -> None:
+    def test_decode_oversized_token_raises_401(self, mock_settings: Settings) -> None:
         oversized_token = "a" * 32769
         with pytest.raises(HTTPException) as exc_info:
             _decode_oidc_token(oversized_token, mock_settings)
+
         assert exc_info.value.status_code == 401
         assert "Invalid access token" in exc_info.value.detail
 
@@ -179,7 +179,7 @@ class TestOIDCAuthDecoding:
         assert exc_info.value.status_code == 403
         assert "Access token has an invalid tenant claim" in exc_info.value.detail
 
-    @patch("app.core.security._decode_oidc_token")
+    @patch("app.auth.oidc_auth._decode_oidc_token")
     def test_decode_access_token_wrapper(
         self, mock_decode_internal: MagicMock, mock_settings: Settings
     ) -> None:
@@ -193,5 +193,6 @@ class TestOIDCAuthDecoding:
         mock_decode_internal.return_value = expected_principal
 
         res = decode_access_token("some.jwt.token", settings=mock_settings)
+
         assert res == expected_principal
         mock_decode_internal.assert_called_once_with("some.jwt.token", mock_settings)
