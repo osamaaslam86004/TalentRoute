@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -24,10 +24,9 @@ async def test_liveness_endpoint() -> None:
 @pytest.mark.asyncio
 async def test_readiness_endpoint_all_healthy(mock_redis: AsyncMock) -> None:
     """Verify that /health/ready returns HTTP 200 when DB and Redis are reachable."""
-    mock_engine = AsyncMock()
+    mock_engine = MagicMock()
     mock_conn = AsyncMock()
     mock_engine.connect.return_value.__aenter__.return_value = mock_conn
-
     with patch("app.api.v1.endpoints.health.engine", mock_engine):
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -44,9 +43,8 @@ async def test_readiness_endpoint_all_healthy(mock_redis: AsyncMock) -> None:
 @pytest.mark.asyncio
 async def test_readiness_endpoint_db_failure(mock_redis: AsyncMock) -> None:
     """Verify HTTP 503 status when database probe encounters an exception."""
-    mock_engine = AsyncMock()
+    mock_engine = MagicMock()
     mock_engine.connect.side_effect = RuntimeError("Database connection timeout")
-
     with patch("app.api.v1.endpoints.health.engine", mock_engine):
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -62,13 +60,11 @@ async def test_readiness_endpoint_db_failure(mock_redis: AsyncMock) -> None:
 @pytest.mark.asyncio
 async def test_readiness_endpoint_redis_failure() -> None:
     """Verify HTTP 503 status when Redis client ping raises an exception."""
-    mock_engine = AsyncMock()
+    mock_engine = MagicMock()
     mock_conn = AsyncMock()
     mock_engine.connect.return_value.__aenter__.return_value = mock_conn
-
     mock_redis_client = AsyncMock()
     mock_redis_client.ping.side_effect = ConnectionError("Redis unreachable")
-
     with (
         patch("app.api.v1.endpoints.health.engine", mock_engine),
         patch(

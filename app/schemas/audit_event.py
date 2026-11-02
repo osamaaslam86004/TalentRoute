@@ -6,7 +6,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class AuditEventRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: uuid.UUID
     occurred_at: datetime
     tenant_id: str
@@ -31,10 +30,12 @@ class AuditEventList(BaseModel):
 
 
 class AuditIntegrityRead(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     tenant_id: str
     valid: bool
     event_count: int
     head_sequence: int
-    first_failure_sequence: int | None = None
+    first_failure_sequence: int | None = Field(default=None, alias="first_failure")
+    first_failure: int | None = Field(default=None, alias="first_failure_sequence")
     failure_reason: str | None = None
     head_hash: str

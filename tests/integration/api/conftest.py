@@ -1,13 +1,15 @@
-"""Global pytest fixtures for API integration test suite."""
+"""Updated conftest.py with isolated per-client principal dispatch."""
 
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import AsyncGenerator, Callable
 from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
+from fastapi import HTTPException, Request, status
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -21,6 +23,8 @@ from app.db.base import Base
 from app.db.session import get_db_session
 from app.main import app
 
+_client_principals: dict[str, Principal | None] = {}
+
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -33,7 +37,6 @@ def event_loop():
 @pytest_asyncio.fixture(scope="function")
 async def async_db_engine() -> AsyncGenerator[AsyncEngine, None]:
     """Create an async SQLite database engine for test isolation."""
-    # Use SQLite in-memory database with StaticPool for async test isolation
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",
         echo=False,
@@ -41,9 +44,7 @@ async def async_db_engine() -> AsyncGenerator[AsyncEngine, None]:
     )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
     yield engine
-
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
@@ -113,29 +114,37 @@ def client_factory(
 ) -> Callable[..., AsyncClient]:
     """Factory fixture generating AsyncClients with injected Principal dependencies."""
 
-    def _create_client(principal: Principal | None = None) -> AsyncClient:
-        async def _override_get_db_session():
-            yield db_session
+    async def _override_get_db_session():
+        yield db_session
 
-        async def _override_get_principal():
-            if principal is None:
-                from fastapi import HTTPException, status
-
+    async def _dynamic_get_principal(request: Request) -> Principal:
+        client_id = request.headers.get("x-test-client-id")
+        if client_id and client_id in _client_principals:
+            p = _client_principals[client_id]
+            if p is None:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Authentication required",
                 )
-            return principal
+            return p
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
 
-        test_app = app
-        test_app.dependency_overrides[get_db_session] = _override_get_db_session
-        if principal is not None:
-            test_app.dependency_overrides[get_principal] = _override_get_principal
-        else:
-            test_app.dependency_overrides.pop(get_principal, None)
+    test_app = app
+    test_app.dependency_overrides[get_db_session] = _override_get_db_session
+    test_app.dependency_overrides[get_principal] = _dynamic_get_principal
 
+    def _create_client(principal: Principal | None = None) -> AsyncClient:
+        client_id = str(uuid.uuid4())
+        _client_principals[client_id] = principal
         transport = ASGITransport(app=test_app)
-        return AsyncClient(transport=transport, base_url="http://test")
+        return AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"X-Test-Client-ID": client_id},
+        )
 
     return _create_client
 
