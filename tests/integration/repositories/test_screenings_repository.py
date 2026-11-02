@@ -1,5 +1,3 @@
-"""Integration tests for app.repositories.screenings module."""
-
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -15,7 +13,6 @@ async def test_get_screening_success(db_session: AsyncSession) -> None:
     """Verify get_screening retrieves an existing record with tenant isolation."""
     screening_id = uuid.uuid4()
     tenant_id = "tenant-alpha"
-
     screening = Screening(
         id=screening_id,
         tenant_id=tenant_id,
@@ -35,9 +32,7 @@ async def test_get_screening_success(db_session: AsyncSession) -> None:
     assert fetched.job_title == "Senior Python Engineer"
 
     # Query with matching tenant_id
-    fetched_tenant = await get_screening(
-        db_session, screening_id, tenant_id=tenant_id
-    )
+    fetched_tenant = await get_screening(db_session, screening_id, tenant_id=tenant_id)
     assert fetched_tenant is not None
     assert fetched_tenant.id == screening_id
 
@@ -47,7 +42,6 @@ async def test_get_screening_for_update(db_session: AsyncSession) -> None:
     """Verify get_screening supports for_update row-level locking option."""
     screening_id = uuid.uuid4()
     tenant_id = "tenant-alpha"
-
     screening = Screening(
         id=screening_id,
         tenant_id=tenant_id,
@@ -73,7 +67,6 @@ async def test_get_screening_not_found_and_tenant_mismatch(
     """Verify get_screening returns None for missing UUID or tenant mismatch."""
     screening_id = uuid.uuid4()
     tenant_id = "tenant-alpha"
-
     screening = Screening(
         id=screening_id,
         tenant_id=tenant_id,

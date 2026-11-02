@@ -1,11 +1,21 @@
 import io
 import logging
+from collections.abc import AsyncGenerator
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
+import app.db.models  # noqa: F401
 from app.core.config import Settings, get_settings
+from app.db.base import Base
 from app.observability.context import clear_context
 from app.observability.logging import _HANDLER_MARK, configure_logging
 
@@ -98,3 +108,34 @@ def sample_jwt_claims() -> dict[str, Any]:
         "roles": ["recruiter"],
         "scope": "screening:write screening:read",
     }
+
+
+"""Global pytest configuration and fixtures for async database testing."""
+
+
+@pytest_asyncio.fixture(scope="function")
+async def async_engine() -> AsyncGenerator[AsyncEngine, None]:
+    """Create an in-memory SQLite async engine for test database schema setup."""
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        echo=False,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    yield engine
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture(scope="function")
+async def db_session(async_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
+    """Provide an isolated AsyncSession for database repository tests."""
+    session_factory = async_sessionmaker(
+        async_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with session_factory() as session:
+        yield session
+        await session.rollback()
