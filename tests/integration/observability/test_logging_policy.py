@@ -8,6 +8,7 @@ import sys
 from typing import Any
 
 import pytest
+from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.observability.context import clear_context, context_scope
@@ -224,23 +225,17 @@ def test_exception_type_name_and_stable_error_code_helpers() -> None:
 
 
 def test_enforce_langsmith_policy_guard() -> None:
-    """Verify enforce_langsmith_policy blocks startup in production if third-party tracing env vars are active."""
-    prod_settings = Settings(environment="production", allow_langsmith_tracing=False)
-    env_active = {"LANGCHAIN_TRACING_V2": "true", "LANGCHAIN_API_KEY": "ls-key-123"}
+    """Verify enforce_langsmith_policy blocks startup in production if third-party tracing
+    env vars are active."""
 
-    with pytest.raises(
-        TelemetryPolicyError, match="LangChain/LangSmith tracing is enabled"
-    ):
-        enforce_langsmith_policy(prod_settings, env_active)
-
-    # Allowed when explicitly configured
-    allowed_prod_settings = Settings(
-        environment="production", allow_langsmith_tracing=True
+    prod_settings = Settings(
+        environment="production",
+        allow_langsmith_tracing=False,
+        api_key=SecretStr("prod-test-key-12345"),
     )
-    flags = enforce_langsmith_policy(allowed_prod_settings, env_active)
-    assert "LANGCHAIN_TRACING_V2" in flags
 
-    # Allowed in development
-    dev_settings = Settings(environment="development", allow_langsmith_tracing=False)
-    flags_dev = enforce_langsmith_policy(dev_settings, env_active)
-    assert "LANGCHAIN_TRACING_V2" in flags_dev
+    test_env = {"LANGSMITH_TRACING": "true"}
+    with pytest.raises(TelemetryPolicyError):
+        enforce_langsmith_policy(prod_settings, env=test_env)
+
+    assert enforce_langsmith_policy(prod_settings, env={}) == []

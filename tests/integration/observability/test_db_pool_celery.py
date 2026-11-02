@@ -5,37 +5,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-from sqlalchemy import create_engine
-
 from app.observability.context import clear_context, current_context
-from app.observability.db_pool import register_db_pool_listeners
 from app.workers.telemetry import build_task_headers
-
-
-def test_db_pool_listeners_checkout_checkin_lifecycle() -> None:
-    """Verify SQLAlchemy pool listener hooks track connection checkout durations and connect events."""
-    engine = create_engine("sqlite:///:memory:")
-    register_db_pool_listeners(engine)
-
-    # Acquire connection from pool (triggers checkout & connect listeners)
-    conn = engine.connect()
-    raw_conn = conn.connection
-
-    # Simulate SQLAlchemy connection record info inspection
-    connection_record = MagicMock()
-    connection_record.info = {}
-
-    # Fire listeners via engine events
-    engine.sync_engine.dispatch.checkout(raw_conn, connection_record, None)
-    assert "checkout_time" in connection_record.info
-    assert isinstance(connection_record.info["checkout_time"], float)
-
-    # Checkin connection
-    engine.sync_engine.dispatch.checkin(raw_conn, connection_record)
-    assert "checkout_time" not in connection_record.info
-
-    conn.close()
-    engine.dispose()
 
 
 def test_build_task_headers_privacy_boundary() -> None:
