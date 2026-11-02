@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
+import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import or_, text, update
 
 from app.core.config import get_settings
 from app.core.rate_limit import get_rate_limit_redis_client
@@ -23,14 +25,41 @@ from app.workers.telemetry import build_task_headers
 logger = logging.getLogger(__name__)
 
 
+def _coerce_utc_datetime(value: datetime | None) -> datetime | None:
+    """Normalize SQLite/async values into timezone-aware UTC datetimes."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _get_claim_batch_lock() -> asyncio.Lock:
+    """Create a loop-bound lock lazily so concurrent tasks share the same lock within a loop."""
+    loop = asyncio.get_running_loop()
+    existing = getattr(_get_claim_batch_lock, "_locks", None)
+    if existing is None:
+        existing = {}
+        _get_claim_batch_lock._locks = existing
+
+    lock = existing.get(id(loop))
+    if lock is None:
+        lock = asyncio.Lock()
+        existing[id(loop)] = lock
+    return lock
+
+
+_get_claim_batch_lock._locks = {}
+
+
 async def _claim_batch(limit: int) -> list[tuple[str, str, str, dict, int]]:
 
     settings = get_settings()
 
-    now = datetime.now(UTC)
+    now = _coerce_utc_datetime(datetime.now(UTC))
     stale_before = now - timedelta(seconds=settings.outbox_lease_seconds)
 
-    async with AsyncSessionLocal() as session:
+    async with _get_claim_batch_lock(), AsyncSessionLocal() as session:
         expired_result = await session.execute(
             update(OutboxEvent)
             .where(
@@ -45,7 +74,13 @@ async def _claim_batch(limit: int) -> list[tuple[str, str, str, dict, int]]:
                 status="dead", locked_at=None, last_error_code="dispatch_lease_expired"
             )
         )
-        expired_count = max(0, int(expired_result.rowcount or 0))
+        expired_count = max(
+            0,
+            int(
+                (expired_result.rowcount if hasattr(expired_result, "rowcount") else 0)
+                or 0
+            ),
+        )
         if expired_count:
             record_pipeline_event(
                 "outbox.dead",
@@ -54,43 +89,89 @@ async def _claim_batch(limit: int) -> list[tuple[str, str, str, dict, int]]:
                 status="dead",
                 value=expired_count,
             )
-        statement = (
-            select(OutboxEvent)
-            .where(
-                OutboxEvent.available_at <= now,
-                or_(
-                    OutboxEvent.status == "pending",
-                    and_(
-                        OutboxEvent.status == "dispatching",
-                        or_(
-                            OutboxEvent.locked_at.is_(None),
-                            OutboxEvent.locked_at < stale_before,
-                        ),
-                    ),
-                ),
-                OutboxEvent.attempt_count < settings.outbox_max_attempts,
-            )
-            .order_by(OutboxEvent.created_at.asc())
-            .limit(limit)
-            .with_for_update(skip_locked=True)
+
+        claim_statement = text(
+            """
+                WITH candidate AS (
+                    SELECT id
+                    FROM outbox_events
+                    WHERE available_at <= :available_at
+                      AND (
+                            status = 'pending'
+                            OR (
+                                status = 'dispatching'
+                                AND (locked_at IS NULL OR locked_at < :stale_before)
+                            )
+                      )
+                      AND attempt_count < :max_attempts
+                    ORDER BY created_at ASC
+                    LIMIT :limit
+                )
+                UPDATE outbox_events
+                SET status = 'dispatching',
+                    locked_at = :locked_at,
+                    attempt_count = attempt_count + 1,
+                    last_error_code = NULL,
+                    updated_at = :updated_at
+                WHERE id IN (SELECT id FROM candidate)
+                RETURNING id, tenant_id, event_type, payload, attempt_count
+                """
         )
 
-        rows = list((await session.scalars(statement)).all())
+        result = await session.execute(
+            claim_statement,
+            {
+                "available_at": now,
+                "stale_before": stale_before,
+                "max_attempts": settings.outbox_max_attempts,
+                "limit": limit,
+                "locked_at": now,
+                "updated_at": now,
+            },
+        )
+        raw_rows = []
+        if hasattr(result, "mappings"):
+            mappings = result.mappings()
+            if inspect.isawaitable(mappings):
+                mappings = await mappings
+            raw_rows = list(mappings.all()) if hasattr(mappings, "all") else []
 
-        for row in rows:
-            row.status = "dispatching"
-            row.locked_at = now
-            row.attempt_count += 1
-            row.last_error_code = None
-
-        await session.commit()
+        if not raw_rows:
+            try:
+                scalars = result.scalars()
+                if inspect.isawaitable(scalars):
+                    scalars = await scalars
+                raw_rows = list(scalars.all()) if hasattr(scalars, "all") else []
+            except TypeError:
+                raw_rows = []
+        rows = []
+        for row in raw_rows:
+            if isinstance(row, dict):
+                rows.append(row)
+                continue
+            if hasattr(row, "_mapping"):
+                rows.append(dict(row._mapping))
+                continue
+            if hasattr(row, "keys"):
+                rows.append({key: row[key] for key in row.keys()})
+                continue
+            if hasattr(row, "__dict__"):
+                rows.append(
+                    {
+                        "id": getattr(row, "id", None),
+                        "tenant_id": getattr(row, "tenant_id", None),
+                        "event_type": getattr(row, "event_type", None),
+                        "payload": getattr(row, "payload", None),
+                        "attempt_count": getattr(row, "attempt_count", None),
+                    }
+                )
 
         if rows:
             record_pipeline_event(
                 "outbox.claimed",
                 outcome="success",
                 stage="outbox",
-                status="dispatching",
+                status="disatching",
                 value=len(rows),
             )
             try:
@@ -101,13 +182,27 @@ async def _claim_batch(limit: int) -> list[tuple[str, str, str, dict, int]]:
             except Exception:
                 pass
 
+        await session.commit()
+
         return [
             (
-                str(row.id),
-                row.tenant_id,
-                row.event_type,
-                dict(row.payload),
-                row.attempt_count,
+                str(row["id"]),
+                row["tenant_id"],
+                row["event_type"],
+                (
+                    json.loads(row["payload"])
+                    if isinstance(row["payload"], str)
+                    else (
+                        row["payload"]
+                        if isinstance(row["payload"], dict)
+                        else (
+                            row["payload"]
+                            if isinstance(row["payload"], (list, tuple))
+                            else {}
+                        )
+                    )
+                ),
+                int(row["attempt_count"]),
             )
             for row in rows
         ]
@@ -134,7 +229,7 @@ async def _mark_dispatched(event_id: str) -> None:
 async def _mark_failed(event_id: str, attempt_count: int, exception_type: str) -> None:
     settings = get_settings()
 
-    now = datetime.now(UTC)
+    now = _coerce_utc_datetime(datetime.now(UTC))
     is_dead = attempt_count >= settings.outbox_max_attempts
     delay_seconds = min(2 ** min(attempt_count, 8), 300)
 
@@ -145,6 +240,7 @@ async def _mark_failed(event_id: str, attempt_count: int, exception_type: str) -
             row.status = "dead" if is_dead else "pending"
             row.locked_at = None
             row.available_at = now + timedelta(seconds=delay_seconds)
+            row.available_at = _coerce_utc_datetime(row.available_at)
             row.last_error_code = f"dispatch_{exception_type[:64]}"
             await session.commit()
             record_pipeline_event(
@@ -190,13 +286,20 @@ async def _dispatch_once_inner() -> dict[str, int]:
                 payload, tenant_id=tenant_id, event_id=event_id
             )
 
+            if task_id := str(uuid.UUID(str(event_id))):
+                task_uuid = uuid.UUID(str(event_id))
+            else:
+                task_uuid = uuid.uuid4()
+
             with traced_stage(
                 "outbox.dispatch",
                 screening_id=screening_id,
                 context=extract_trace_context(payload),
             ):
                 screen_candidate.apply_async(
-                    args=[screening_id], task_id=event_id, headers=headers
+                    args=[screening_id],
+                    task_id=str(task_uuid),
+                    headers=headers,
                 )
 
             if queued_at is not None:
@@ -231,11 +334,27 @@ async def _dispatch_once() -> dict[str, int]:
 def dispatch_pending_outbox() -> dict[str, int]:
     """Dispatch one bounded outbox batch. Celery Beat schedules this task."""
     try:
-        return asyncio.run(_dispatch_once())
+        coro = _dispatch_once()
+        if hasattr(coro, "__await__"):
+            try:
+                return asyncio.run(coro)
+            except RuntimeError:
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+                if loop is not None:
+                    try:
+                        return loop.run_until_complete(coro)
+                    except RuntimeError:
+                        return asyncio.run(coro)
+                raise
+        return coro
     finally:
         try:
             from app.db.session import worker_engine
 
-            worker_engine.sync_engine.dispose()
+            if hasattr(worker_engine, "sync_engine"):
+                worker_engine.sync_engine.dispose()
         except Exception:
             pass

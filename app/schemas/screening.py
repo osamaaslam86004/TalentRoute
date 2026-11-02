@@ -12,7 +12,7 @@ NonEmpty = Annotated[str, Field(min_length=1, max_length=500)]
 class ScreeningCreateRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    application_text: str = Field(min_length=20, max_length=100000)
+    application_text: str = Field(min_length=1, max_length=200000)
     job_title: str = Field(default="Python Developer", min_length=2, max_length=160)
     required_skills: list[NonEmpty] = Field(
         default_factory=lambda: ["Python"], min_length=1, max_length=30

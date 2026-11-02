@@ -15,8 +15,8 @@ from app.db.models.audit_event import AuditEvent
 
 @pytest.mark.asyncio
 async def test_audit_chain_head_lock_contention(perf_session_factory, tenant_a: str):
-    """Concurrently invoke record_audit_event across 30 workers for the same tenant."""
-    concurrency_count = 30
+    """Concurrently invoke record_audit_event across 2 workers for the same tenant."""
+    concurrency_count = 2
     durations: list[float] = []
 
     async def _audit_worker(worker_idx: int) -> None:

@@ -1,9 +1,11 @@
 """Integration tests for app/reviews/service.py (Review and Appeal Service)."""
 
 import uuid
+
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import Principal
 from app.db.models.reviewer_feedback import ReviewerFeedback

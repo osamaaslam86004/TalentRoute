@@ -31,10 +31,20 @@ class AuditEventList(BaseModel):
 
 
 class AuditIntegrityRead(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
     tenant_id: str
     valid: bool
     event_count: int
     head_sequence: int
-    first_failure_sequence: int | None = None
+    first_failure: int | None = Field(
+        default=None,
+        alias="first_failure_sequence",
+        serialization_alias="first_failure",
+    )
     failure_reason: str | None = None
     head_hash: str
+
+    @property
+    def model_dump(self):
+        return super().model_dump(by_alias=True)

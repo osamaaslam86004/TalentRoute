@@ -19,8 +19,21 @@ async def liveness() -> dict[str, str]:
 async def readiness(response: Response) -> dict[str, str]:
     components = {"database": "ok", "redis": "ok"}
     try:
-        async with engine.connect() as connection:
-            await connection.execute(text("SELECT 1"))
+        engine_obj = engine
+        if engine_obj is None:
+            raise TypeError("engine is not bound")
+        if not hasattr(engine_obj, "connect"):
+            raise TypeError("engine does not provide connect")
+        connect_result = engine_obj.connect()
+        if hasattr(connect_result, "__aenter__"):
+            async with connect_result as connection:
+                await connection.execute(text("SELECT 1"))
+        elif hasattr(connect_result, "__await__"):
+            connection = await connect_result
+            async with connection as conn:
+                await conn.execute(text("SELECT 1"))
+        else:
+            raise TypeError("engine connect did not yield an async context manager")
     except Exception as exc:
         components["database"] = "unavailable"
         logger.warning(

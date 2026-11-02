@@ -39,8 +39,7 @@ def create_screening_graph(provider: AssessmentProvider | None = None):
     def hr_review(_: ScreeningState) -> dict:
         return {
             "recommendation": Recommendation.HR_REVIEW,
-            "recommendation_reason": "Skills evidence supports prioritizing a human HR \
-                review; no hiring decision has been made.",
+            "recommendation_reason": "Skills evidence supports prioritizing a human HR review; no hiring decision has been made.",
             "human_review_required": True,
         }
 

@@ -109,7 +109,12 @@ class TestScreeningRateLimiter:
         mock_redis = AsyncMock()
         mock_redis.eval.side_effect = ConnectionError("Redis connection refused")
 
-        settings = Settings(rate_limit_fail_open=False)
+        settings = Settings(
+            environment="production",
+            auth_mode="api_key",
+            api_key="test-secret-api-key-12345",
+            rate_limit_fail_open=False,
+        )
 
         with (
             patch("app.core.rate_limit.get_settings", return_value=settings),
@@ -147,7 +152,7 @@ class TestScreeningRateLimiter:
             mock_metrics.assert_called_once_with("backend_error_open")
 
     @pytest.mark.asyncio
-    async def test_close_rate_limit_client() -> None:
+    async def test_close_rate_limit_client(self) -> None:
         """Verify close_rate_limit_client closes Redis connection and clears cache."""
         mock_redis = AsyncMock()
         with patch(
@@ -155,3 +160,4 @@ class TestScreeningRateLimiter:
         ) as mock_get_client:
             await close_rate_limit_client()
             mock_redis.aclose.assert_called_once()
+            mock_get_client.assert_called_once()

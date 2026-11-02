@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -16,10 +17,10 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from app.api.v1.router import api_router
 from app.core.security import Principal, get_principal
 from app.db.base import Base
 from app.db.session import get_db_session
-from app.main import app
 
 
 @pytest.fixture(scope="session")
@@ -127,15 +128,22 @@ def client_factory(
                 )
             return principal
 
-        test_app = app
+        test_app = FastAPI()
+        test_app.include_router(api_router)
         test_app.dependency_overrides[get_db_session] = _override_get_db_session
         if principal is not None:
             test_app.dependency_overrides[get_principal] = _override_get_principal
-        else:
-            test_app.dependency_overrides.pop(get_principal, None)
 
         transport = ASGITransport(app=test_app)
-        return AsyncClient(transport=transport, base_url="http://test")
+        client = AsyncClient(transport=transport, base_url="http://test")
+
+        async def _cleanup() -> None:
+            await client.aclose()
+            test_app.dependency_overrides.clear()
+
+        client.__aenter__ = lambda: client  # type: ignore[assignment]
+        client.__aexit__ = lambda *args: _cleanup()  # type: ignore[assignment]
+        return client
 
     return _create_client
 

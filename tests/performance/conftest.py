@@ -34,9 +34,9 @@ def event_loop():
     loop.close()
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="function")
 async def perf_async_engine() -> AsyncGenerator[AsyncEngine, None]:
-    """Provide a session-scoped async SQLAlchemy engine configured for performance testing."""
+    """Provide a fresh SQLite engine per performance test to avoid stale rows across cases."""
     engine = create_async_engine(
         PERF_TEST_DB_URL,
         connect_args={"check_same_thread": False},

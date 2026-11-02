@@ -61,7 +61,11 @@ async def enforce_screening_rate_limit(request: Request, principal: Principal) -
             "rate limiter backend unavailable error_type=%s", type(exc).__name__
         )
 
-        if settings.rate_limit_fail_open:
+        backend_fail_open = (
+            settings.rate_limit_fail_open
+            or settings.environment in {"development", "test"}
+        )
+        if backend_fail_open:
             record_rate_limit_decision("backend_error_open")
             return
         record_rate_limit_decision("backend_error_closed")

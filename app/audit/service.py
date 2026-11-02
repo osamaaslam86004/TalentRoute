@@ -6,9 +6,12 @@ provider responses, credentials, free-form reviewer notes, or unmatched request 
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import math
 import time
 import uuid
+from collections import defaultdict
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -21,6 +24,27 @@ from app.core.security import Principal
 from app.db.models.audit_chain_head import AuditChainHead
 from app.db.models.audit_event import AuditEvent
 from app.observability.metrics import record_audit_head_lock_duration
+
+_AUDIT_CHAIN_LOCKS: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+
+def _get_tenant_audit_lock(tenant_id: str) -> asyncio.Lock:
+    """Return a per-tenant lock attached to the current asyncio loop to avoid cross-loop lock reuse."""
+    loop = asyncio.get_running_loop()
+    registry = getattr(_get_tenant_audit_lock, "_locks", None)
+    if registry is None:
+        registry = defaultdict(asyncio.Lock)
+        _get_tenant_audit_lock._locks = registry
+
+    loop_key = (loop, tenant_id)
+    lock = registry.get(loop_key)
+    if lock is None:
+        lock = asyncio.Lock()
+        registry[loop_key] = lock
+    return lock
+
+
+_get_tenant_audit_lock._locks = defaultdict(asyncio.Lock)
 
 _ALLOWED_METADATA = {
     "status",
@@ -82,93 +106,195 @@ async def record_audit_event(
     actor_subject: str | None = None,
     actor_roles: list[str] | None = None,
 ) -> AuditEvent:
-    """Append an event and extend the tenant hash chain under a locked chain-head row."""
+    """Append an event and extend the tenant hash chain under a single transaction."""
 
     tenant_id = tenant_id[:128]
-
-    await session.execute(
-        text("""
-            INSERT INTO audit_chain_heads (tenant_id, last_sequence, last_hash, updated_at)
-            VALUES (:tenant_id, 0, :genesis_hash, CURRENT_TIMESTAMP)
-            ON CONFLICT (tenant_id) DO NOTHING
-        """),
-        {"tenant_id": tenant_id, "genesis_hash": GENESIS_HASH},
-    )
-
     lock_start = time.perf_counter()
-    try:
-        head = await session.scalar(
-            select(AuditChainHead)
-            .where(AuditChainHead.tenant_id == tenant_id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-        record_audit_head_lock_duration(
-            max(0.0, time.perf_counter() - lock_start), outcome="success"
-        )
-    except Exception:
-        record_audit_head_lock_duration(
-            max(0.0, time.perf_counter() - lock_start), outcome="failure"
-        )
-        raise
+    tenant_lock = _get_tenant_audit_lock(tenant_id)
 
-    if head is None:
-        raise RuntimeError("Unable to allocate audit chain head")
+    async def _session_has_transaction() -> bool:
+        maybe = session.in_transaction()
+        if asyncio.iscoroutine(maybe):
+            maybe = await maybe
+        return bool(maybe)
 
-    event_id = uuid.uuid4()
-    occurred_at = datetime.now(UTC)
-    subject = (actor_subject or (principal.subject if principal else "service:worker"))[
-        :255
-    ]
-    roles = sorted(principal.roles) if principal else (actor_roles or ["service"])
-    request_id = (request_id or "")[:64] or None
-    action = action[:120]
-    resource_type = resource_type[:80]
-    resource_id = (resource_id or "")[:128] or None
-    outcome = outcome[:40]
-    sanitized_metadata = safe_audit_metadata(metadata)
-    sequence_no = head.last_sequence + 1
-    previous_hash = head.last_hash
+    async with tenant_lock:
+        try:
+            in_tx = session.in_transaction()
+            if inspect.isawaitable(in_tx):
+                in_tx = await in_tx
 
-    hash_payload = audit_hash_payload(
-        event_id=str(event_id),
-        occurred_at=occurred_at,
-        tenant_id=tenant_id,
-        actor_subject=subject,
-        actor_roles=roles,
-        request_id=request_id,
-        action=action,
-        resource_type=resource_type,
-        resource_id=resource_id,
-        outcome=outcome,
-        metadata=sanitized_metadata,
-        sequence_no=sequence_no,
-        previous_hash=previous_hash,
+            if in_tx:
+                nested = session.begin_nested()
+                if inspect.isawaitable(nested):
+                    nested = await nested
+                async with nested:
+                    await session.execute(
+                        text("""
+                            INSERT INTO audit_chain_heads (tenant_id, last_sequence, last_hash, updated_at)
+                            VALUES (:tenant_id, 0, :genesis_hash, CURRENT_TIMESTAMP)
+                            ON CONFLICT (tenant_id) DO NOTHING
+                        """),
+                        {"tenant_id": tenant_id, "genesis_hash": GENESIS_HASH},
+                    )
+
+                    head = await session.scalar(
+                        select(AuditChainHead)
+                        .where(AuditChainHead.tenant_id == tenant_id)
+                        .with_for_update()
+                        .execution_options(populate_existing=True)
+                    )
+                    if head is None:
+                        raise RuntimeError("Unable to allocate audit chain head")
+
+                    event_id = uuid.uuid4()
+                    occurred_at = datetime.now(UTC)
+                    subject = (
+                        actor_subject
+                        or (principal.subject if principal else "service:worker")
+                    )[:255]
+                    roles = (
+                        sorted(principal.roles)
+                        if principal
+                        else (actor_roles or ["service"])
+                    )
+                    request_id = (request_id or "")[:64] or None
+                    action = action[:120]
+                    resource_type = resource_type[:80]
+                    resource_id = (resource_id or "")[:128] or None
+                    outcome = outcome[:40]
+                    sanitized_metadata = safe_audit_metadata(metadata)
+                    sequence_no = head.last_sequence + 1
+                    previous_hash = head.last_hash
+
+                    hash_payload = audit_hash_payload(
+                        event_id=str(event_id),
+                        occurred_at=occurred_at,
+                        tenant_id=tenant_id,
+                        actor_subject=subject,
+                        actor_roles=roles,
+                        request_id=request_id,
+                        action=action,
+                        resource_type=resource_type,
+                        resource_id=resource_id,
+                        outcome=outcome,
+                        metadata=sanitized_metadata,
+                        sequence_no=sequence_no,
+                        previous_hash=previous_hash,
+                    )
+
+                    event_hash = calculate_event_hash(hash_payload)
+
+                    event = AuditEvent(
+                        id=event_id,
+                        occurred_at=occurred_at,
+                        tenant_id=tenant_id,
+                        sequence_no=sequence_no,
+                        previous_hash=previous_hash,
+                        event_hash=event_hash,
+                        actor_subject=subject,
+                        actor_roles=roles,
+                        request_id=request_id,
+                        action=action,
+                        resource_type=resource_type,
+                        resource_id=resource_id,
+                        outcome=outcome,
+                        event_metadata=sanitized_metadata,
+                    )
+                    head.last_sequence = sequence_no
+                    head.last_hash = event_hash
+
+                    session.add(event)
+            else:
+                tx = session.begin()
+                if inspect.isawaitable(tx):
+                    tx = await tx
+                async with tx:
+                    await session.execute(
+                        text("""
+                            INSERT INTO audit_chain_heads (tenant_id, last_sequence, last_hash, updated_at)
+                            VALUES (:tenant_id, 0, :genesis_hash, CURRENT_TIMESTAMP)
+                            ON CONFLICT (tenant_id) DO NOTHING
+                        """),
+                        {"tenant_id": tenant_id, "genesis_hash": GENESIS_HASH},
+                    )
+
+                    head = await session.scalar(
+                        select(AuditChainHead)
+                        .where(AuditChainHead.tenant_id == tenant_id)
+                        .with_for_update()
+                        .execution_options(populate_existing=True)
+                    )
+                    if head is None:
+                        raise RuntimeError("Unable to allocate audit chain head")
+
+                    event_id = uuid.uuid4()
+                    occurred_at = datetime.now(UTC)
+                    subject = (
+                        actor_subject
+                        or (principal.subject if principal else "service:worker")
+                    )[:255]
+                    roles = (
+                        sorted(principal.roles)
+                        if principal
+                        else (actor_roles or ["service"])
+                    )
+                    request_id = (request_id or "")[:64] or None
+                    action = action[:120]
+                    resource_type = resource_type[:80]
+                    resource_id = (resource_id or "")[:128] or None
+                    outcome = outcome[:40]
+                    sanitized_metadata = safe_audit_metadata(metadata)
+                    sequence_no = head.last_sequence + 1
+                    previous_hash = head.last_hash
+
+                    hash_payload = audit_hash_payload(
+                        event_id=str(event_id),
+                        occurred_at=occurred_at,
+                        tenant_id=tenant_id,
+                        actor_subject=subject,
+                        actor_roles=roles,
+                        request_id=request_id,
+                        action=action,
+                        resource_type=resource_type,
+                        resource_id=resource_id,
+                        outcome=outcome,
+                        metadata=sanitized_metadata,
+                        sequence_no=sequence_no,
+                        previous_hash=previous_hash,
+                    )
+
+                    event_hash = calculate_event_hash(hash_payload)
+
+                    event = AuditEvent(
+                        id=event_id,
+                        occurred_at=occurred_at,
+                        tenant_id=tenant_id,
+                        sequence_no=sequence_no,
+                        previous_hash=previous_hash,
+                        event_hash=event_hash,
+                        actor_subject=subject,
+                        actor_roles=roles,
+                        request_id=request_id,
+                        action=action,
+                        resource_type=resource_type,
+                        resource_id=resource_id,
+                        outcome=outcome,
+                        event_metadata=sanitized_metadata,
+                    )
+                    head.last_sequence = sequence_no
+                    head.last_hash = event_hash
+
+                    session.add(event)
+        except Exception:
+            record_audit_head_lock_duration(
+                max(0.0, time.perf_counter() - lock_start), outcome="failure"
+            )
+            raise
+
+    record_audit_head_lock_duration(
+        max(0.0, time.perf_counter() - lock_start), outcome="success"
     )
-
-    event_hash = calculate_event_hash(hash_payload)
-
-    event = AuditEvent(
-        id=event_id,
-        occurred_at=occurred_at,
-        tenant_id=tenant_id,
-        sequence_no=sequence_no,
-        previous_hash=previous_hash,
-        event_hash=event_hash,
-        actor_subject=subject,
-        actor_roles=roles,
-        request_id=request_id,
-        action=action,
-        resource_type=resource_type,
-        resource_id=resource_id,
-        outcome=outcome,
-        event_metadata=sanitized_metadata,
-    )
-    head.last_sequence = sequence_no
-    head.last_hash = event_hash
-
-    session.add(event)
-
     return event
 
 

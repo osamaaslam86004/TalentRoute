@@ -9,7 +9,9 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 import jwt
-from fastapi import Depends, HTTPException, Request, Security, status
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.params import Depends as FastAPIDepends
+from fastapi.params import Security as FastAPISecurity
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
 from jwt.exceptions import PyJWKClientConnectionError, PyJWKClientError, PyJWTError
@@ -21,6 +23,23 @@ from app.observability.policy import actor_hash
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 _bearer = HTTPBearer(auto_error=False, scheme_name="OIDC Bearer Token")
+
+
+def _normalize_dependency_value(value: object) -> object:
+    """Collapse FastAPI dependency wrappers to the raw credential they represent."""
+    if value is None:
+        return None
+    if isinstance(value, (FastAPISecurity, FastAPIDepends)):
+        return None
+    if hasattr(value, "dependency"):
+        return None
+    if isinstance(value, HTTPAuthorizationCredentials):
+        return value.credentials
+    if hasattr(value, "credentials") and not isinstance(value, (str, bytes)):
+        credentials = value.credentials
+        if isinstance(credentials, str):
+            return credentials
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,7 +149,6 @@ def _decode_oidc_token(token: str, settings: Settings) -> Principal:
         raise _unauthorized("Invalid or expired access token") from exc
 
     except Exception as exc:
-        # Fail closed for unexpected validation failures without exposing token/provider details.
         raise _unauthorized("Unable to validate access token") from exc
 
     subject = claims.get("sub")
@@ -161,7 +179,6 @@ def _decode_oidc_token(token: str, settings: Settings) -> Principal:
     )
     scopes = _claim_strings(raw_scopes)
 
-    # Normalize common plural claim spellings without weakening action-level permissions.
     aliases = {
         "screenings:read": "screening:read",
         "screenings:write": "screening:write",
@@ -183,15 +200,41 @@ def _decode_oidc_token(token: str, settings: Settings) -> Principal:
 
 async def get_principal(
     request: Request,
-    provided_key: str | None = Security(_api_key_header),
+    provided_key: str | None = Depends(_api_key_header),
     bearer: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> Principal:
+    provided_key = _normalize_dependency_value(provided_key)
+    bearer = _normalize_dependency_value(bearer)
+
+    if provided_key is None and request is not None:
+        provided_key = request.headers.get("x-api-key") or request.headers.get(
+            "X-API-Key"
+        )
+    if bearer is None and request is not None:
+        auth_header = request.headers.get("authorization")
+        if auth_header:
+            scheme, _, token = auth_header.partition(" ")
+            if scheme.lower() == "bearer" and token:
+                bearer = HTTPAuthorizationCredentials(
+                    scheme="Bearer", credentials=token
+                )
+            elif auth_header.lower().startswith("bearer "):
+                bearer = HTTPAuthorizationCredentials(
+                    scheme="Bearer", credentials=auth_header[7:].strip()
+                )
+
+    if provided_key is not None and not isinstance(provided_key, str):
+        provided_key = None
+    if bearer is not None and not isinstance(bearer, str):
+        bearer = _normalize_dependency_value(bearer)
 
     settings = get_settings()
 
     if settings.auth_mode in {"auto", "oidc"} and bearer is not None:
         principal = await asyncio.to_thread(
-            _decode_oidc_token, bearer.credentials, settings
+            _decode_oidc_token,
+            bearer if isinstance(bearer, str) else bearer.credentials,
+            settings,
         )
         _bind_principal(request, principal, settings)
         return principal
@@ -227,7 +270,10 @@ async def get_principal(
 
 
 def require_permission(permission: str) -> Callable:
-    async def dependency(principal: Principal = Depends(get_principal)) -> Principal:
+    async def dependency(
+        request: Request,
+        principal: Principal = Depends(get_principal),
+    ) -> Principal:
         if not principal.can(permission):
             record_auth_failure("forbidden")
             raise HTTPException(status_code=403, detail="Insufficient permissions")

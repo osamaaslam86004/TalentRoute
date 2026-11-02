@@ -2,6 +2,7 @@
 """Create blinded A/B review tasks and a separate private model-identity map."""
 
 import argparse
+import os
 from pathlib import Path
 
 from app.evaluation.evaluation_pipeline import load_jsonl, write_json
@@ -46,10 +47,27 @@ def main() -> int:
         args.public_output, {"review_version": "blinded-pairwise-v1", "tasks": public}
     )
 
-    # Keep this file out of version control and accessible only to the evaluation owner.
-    write_json(args.private_map_output, {"private_mapping": private})
+    private_output = Path(args.private_map_output)
+    private_output.parent.mkdir(parents=True, exist_ok=True)
+    private_output.write_text(
+        __import__("json").dumps(
+            {"review_version": "blinded-pairwise-v1", "private_mapping": private},
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
-    Path(args.private_map_output).chmod(0o600)
+    # Keep this file out of version control and accessible only to the evaluation owner.
+    # On Windows, chmod may be effectively a no-op, so set the mode when supported and
+    # do not fail if the platform enforces a different permission model.
+    try:
+        if os.name != "nt":
+            os.chmod(private_output, 0o600)
+    except (AttributeError, NotImplementedError, OSError):
+        pass
     print(
         f"Created {len(public)} blinded tasks. Keep the private mapping separate from reviewers."
     )
