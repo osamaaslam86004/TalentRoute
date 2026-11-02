@@ -1,5 +1,7 @@
 import io
 import logging
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -60,7 +62,6 @@ def configure(make_settings):
         return stream
 
     yield _configure
-
     for handler in list(root.handlers):
         if getattr(handler, _HANDLER_MARK, False):
             root.removeHandler(handler)
@@ -69,3 +70,31 @@ def configure(make_settings):
         framework_logger = logging.getLogger(name)
         framework_logger.handlers[:] = handlers
         framework_logger.propagate = propagate
+
+
+@pytest.fixture
+def mock_jwk_key() -> MagicMock:
+    key_mock = MagicMock()
+    key_mock.key = "mock_public_key_pem"
+    return key_mock
+
+
+@pytest.fixture
+def mock_jwks_client(mock_jwk_key: MagicMock) -> MagicMock:
+    client_mock = MagicMock()
+    client_mock.get_signing_key_from_jwt.return_value = mock_jwk_key
+    return client_mock
+
+
+@pytest.fixture
+def sample_jwt_claims() -> dict[str, Any]:
+    return {
+        "sub": "user-456",
+        "iss": "https://auth.example.com/",
+        "aud": "candidate-screening-api",
+        "exp": 4102444800,  # Far future
+        "iat": 1600000000,
+        "tenant_id": "tenant-alpha",
+        "roles": ["recruiter"],
+        "scope": "screening:write screening:read",
+    }

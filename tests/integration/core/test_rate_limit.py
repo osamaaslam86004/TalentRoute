@@ -1,5 +1,4 @@
 """Unit and integration tests for app/core/rate_limit.py Redis Lua rate limiter."""
-
 from __future__ import annotations
 
 import hashlib
@@ -49,19 +48,16 @@ class TestScreeningRateLimiter:
         mock_redis = AsyncMock()
         # Mock Lua script eval returning [current_count, remaining_ttl]
         mock_redis.eval.return_value = [1, 60]
-
         settings = Settings(
             screening_rate_limit_requests=30,
             screening_rate_limit_window_seconds=60,
         )
-
         with (
             patch("app.core.rate_limit.get_settings", return_value=settings),
             patch("app.core.rate_limit._redis_client", return_value=mock_redis),
             patch("app.core.rate_limit.record_rate_limit_decision") as mock_metrics,
         ):
             await enforce_screening_rate_limit(mock_request, rate_limit_principal)
-
             mock_metrics.assert_called_once_with("allowed")
             mock_redis.eval.assert_called_once()
             # Verify SHA256 key generation format
@@ -82,12 +78,10 @@ class TestScreeningRateLimiter:
         mock_redis = AsyncMock()
         # Return count 31 exceeding threshold 30, with 45s remaining TTL
         mock_redis.eval.return_value = [31, 45]
-
         settings = Settings(
             screening_rate_limit_requests=30,
             screening_rate_limit_window_seconds=60,
         )
-
         with (
             patch("app.core.rate_limit.get_settings", return_value=settings),
             patch("app.core.rate_limit._redis_client", return_value=mock_redis),
@@ -95,7 +89,6 @@ class TestScreeningRateLimiter:
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await enforce_screening_rate_limit(mock_request, rate_limit_principal)
-
             assert exc_info.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
             assert exc_info.value.detail == "Screening submission rate limit exceeded"
             assert exc_info.value.headers == {"Retry-After": "45"}
@@ -108,9 +101,7 @@ class TestScreeningRateLimiter:
         """Verify Redis backend failure in fail-closed mode raises HTTP 503 Service Unavailable."""
         mock_redis = AsyncMock()
         mock_redis.eval.side_effect = ConnectionError("Redis connection refused")
-
         settings = Settings(rate_limit_fail_open=False)
-
         with (
             patch("app.core.rate_limit.get_settings", return_value=settings),
             patch("app.core.rate_limit._redis_client", return_value=mock_redis),
@@ -118,7 +109,6 @@ class TestScreeningRateLimiter:
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await enforce_screening_rate_limit(mock_request, rate_limit_principal)
-
             assert exc_info.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
             assert (
                 exc_info.value.detail
@@ -134,9 +124,7 @@ class TestScreeningRateLimiter:
         """Verify Redis backend failure in fail-open mode allows request through quietly."""
         mock_redis = AsyncMock()
         mock_redis.eval.side_effect = TimeoutError("Redis socket timeout")
-
         settings = Settings(rate_limit_fail_open=True)
-
         with (
             patch("app.core.rate_limit.get_settings", return_value=settings),
             patch("app.core.rate_limit._redis_client", return_value=mock_redis),
@@ -147,7 +135,7 @@ class TestScreeningRateLimiter:
             mock_metrics.assert_called_once_with("backend_error_open")
 
     @pytest.mark.asyncio
-    async def test_close_rate_limit_client() -> None:
+    async def test_close_rate_limit_client(self) -> None:
         """Verify close_rate_limit_client closes Redis connection and clears cache."""
         mock_redis = AsyncMock()
         with patch(

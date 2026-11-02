@@ -1,16 +1,15 @@
 """Integration tests for app/core/security.py get_principal and require_permission dependencies."""
-
 from __future__ import annotations
 
 from unittest.mock import patch
 
 import pytest
-from fastapi import status
+from fastapi import FastAPI, status
 from httpx import AsyncClient
 from pydantic import SecretStr
 
 from app.core.config import Settings
-from app.core.security import Principal
+from app.core.security import Principal, get_principal
 
 
 class TestSecurityDependenciesIntegration:
@@ -25,13 +24,11 @@ class TestSecurityDependenciesIntegration:
             auth_mode="auto",
             api_key=SecretStr("super-secret-api-key-99999"),
         )
-
         with patch("app.core.security.get_settings", return_value=settings):
             response = await async_core_client.get(
                 "/api/v1/user/me",
                 headers={"X-API-Key": "super-secret-api-key-99999"},
             )
-
             assert response.status_code == status.HTTP_200_OK
             data = response.json()
             assert data["subject"] == "api-key-client"
@@ -48,13 +45,11 @@ class TestSecurityDependenciesIntegration:
             auth_mode="api_key",
             api_key=SecretStr("correct-api-key"),
         )
-
         with patch("app.core.security.get_settings", return_value=settings):
             response = await async_core_client.get(
                 "/api/v1/user/me",
                 headers={"X-API-Key": "wrong-api-key"},
             )
-
             assert response.status_code == status.HTTP_401_UNAUTHORIZED
             assert response.json()["detail"] == "Invalid or missing credentials"
 
@@ -68,10 +63,8 @@ class TestSecurityDependenciesIntegration:
             auth_mode="auto",
             api_key=None,
         )
-
         with patch("app.core.security.get_settings", return_value=settings):
             response = await async_core_client.get("/api/v1/user/me")
-
             assert response.status_code == status.HTTP_200_OK
             data = response.json()
             assert data["subject"] == "local-development"
@@ -79,7 +72,7 @@ class TestSecurityDependenciesIntegration:
 
     @pytest.mark.asyncio
     async def test_require_permission_authorized_access(
-        self, async_core_client: AsyncClient
+        self, core_test_app: FastAPI, async_core_client: AsyncClient
     ) -> None:
         """Verify principal with required permission accesses endpoint successfully."""
         recruiter_principal = Principal(
@@ -89,19 +82,20 @@ class TestSecurityDependenciesIntegration:
             scopes=frozenset({"screening:write"}),
             auth_method="oidc",
         )
-
-        with patch("app.core.security.get_principal", return_value=recruiter_principal):
+        try:
+            core_test_app.dependency_overrides[get_principal] = lambda: recruiter_principal
             response = await async_core_client.post("/api/v1/screenings")
-
             assert response.status_code == status.HTTP_200_OK
             assert response.json() == {
                 "status": "screening_created",
                 "tenant_id": "tenant-beta",
             }
+        finally:
+            core_test_app.dependency_overrides.clear()
 
     @pytest.mark.asyncio
     async def test_require_permission_insufficient_permissions_raises_403(
-        self, async_core_client: AsyncClient
+        self, core_test_app: FastAPI, async_core_client: AsyncClient
     ) -> None:
         """Verify principal lacking required permission receives HTTP 403 Forbidden."""
         reviewer_principal = Principal(
@@ -111,12 +105,13 @@ class TestSecurityDependenciesIntegration:
             scopes=frozenset({"review:write"}),
             auth_method="oidc",
         )
-
-        with patch("app.core.security.get_principal", return_value=reviewer_principal):
+        try:
+            core_test_app.dependency_overrides[get_principal] = lambda: reviewer_principal
             # Reviewer attempting to delete a screening (requires screening:delete)
             response = await async_core_client.delete(
                 "/api/v1/screenings/screening-123"
             )
-
             assert response.status_code == status.HTTP_403_FORBIDDEN
             assert response.json()["detail"] == "Insufficient permissions"
+        finally:
+            core_test_app.dependency_overrides.clear()

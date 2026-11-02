@@ -4,10 +4,10 @@ from collections.abc import AsyncGenerator, Callable
 from typing import Any
 from unittest.mock import MagicMock
 
-from fastapi import Depends, FastAPI
-from httpx import ASGITransport, AsyncClient
 import pytest
 import pytest_asyncio
+from fastapi import Depends, FastAPI
+from httpx import ASGITransport, AsyncClient
 
 from app.core.config import Settings
 from app.core.security import Principal, get_principal, require_permission
@@ -140,7 +140,5 @@ def test_app() -> FastAPI:
 @pytest_asyncio.fixture
 async def async_client(test_app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
     transport = ASGITransport(app=test_app)
-    async with AsyncClient(
-        transport=transport, base_url="http://testserver"
-    ) as client:
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         yield client
