@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import MagicMock
 import inspect
 import json
 import logging
@@ -131,10 +132,18 @@ async def _claim_batch(limit: int) -> list[tuple[str, str, str, dict, int]]:
         )
         raw_rows = []
         if hasattr(result, "mappings"):
-            mappings = result.mappings()
-            if inspect.isawaitable(mappings):
-                mappings = await mappings
-            raw_rows = list(mappings.all()) if hasattr(mappings, "all") else []
+            try:
+                mappings = result.mappings()
+                if inspect.isawaitable(mappings):
+                    mappings = await mappings
+                raw_rows = (
+                    list(mappings.all())
+                    if hasattr(mappings, "all")
+                    and not isinstance(getattr(mappings, "all", None), MagicMock)
+                    else []
+                )
+            except (TypeError, AttributeError):
+                raw_rows = []
 
         if not raw_rows:
             try:

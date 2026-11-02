@@ -596,13 +596,6 @@ class TestDecodeOidcTokenTenant:
 
         assert principal.tenant_id == "globex"
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "BUG: with OIDC_REQUIRE_TENANT_CLAIM=false a whitespace-only tenant claim is truthy, so "
-            "it skips the 'default' fallback and is stripped to tenant_id == ''. Expected 'default'."
-        ),
-    )
     def test_whitespace_only_tenant_falls_back_to_default_when_not_required(
         self, make_oidc_settings, jwt_env
     ):
@@ -1076,15 +1069,6 @@ class TestGetPrincipalApiKey:
         with pytest.raises(HTTPException):
             await get_principal(make_request(), provided_key="nope", bearer=None)  # type: ignore[arg-type]
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=TypeError,
-        reason=(
-            "BUG: hmac.compare_digest() raises TypeError for str arguments containing non-ASCII "
-            "characters (HTTP headers are latin-1 decoded), so an unauthenticated client can turn "
-            "a 401 into a 500. Compare bytes (e.g. .encode('utf-8')) instead."
-        ),
-    )
     async def test_non_ascii_api_key_header_is_rejected_with_401_not_a_crash(
         self, use_settings
     ):

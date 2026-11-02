@@ -191,7 +191,7 @@ def _decode_oidc_token(token: str, settings: Settings) -> Principal:
 
     return Principal(
         subject=subject,
-        tenant_id=str(tenant).strip() if tenant else "default",
+        tenant_id=str(tenant).strip() if tenant and str(tenant).strip() else "default",
         roles=roles,
         scopes=scopes,
         auth_method="oidc",
@@ -206,12 +206,13 @@ async def get_principal(
     provided_key = _normalize_dependency_value(provided_key)
     bearer = _normalize_dependency_value(bearer)
 
-    if provided_key is None and request is not None:
-        provided_key = request.headers.get("x-api-key") or request.headers.get(
+    headers = getattr(request, "headers", None)
+    if provided_key is None and headers is not None:
+        provided_key = headers.get("x-api-key") or headers.get(
             "X-API-Key"
         )
-    if bearer is None and request is not None:
-        auth_header = request.headers.get("authorization")
+    if bearer is None and headers is not None:
+        auth_header = headers.get("authorization")
         if auth_header:
             scheme, _, token = auth_header.partition(" ")
             if scheme.lower() == "bearer" and token:
@@ -241,16 +242,20 @@ async def get_principal(
     if settings.auth_mode == "oidc":
         raise _unauthorized(reason="missing" if provided_key is None else "invalid")
     expected = settings.api_key.get_secret_value() if settings.api_key else None
-    if expected and provided_key and hmac.compare_digest(provided_key, expected):
-        principal = Principal(
-            subject="api-key-client",
-            tenant_id="default",
-            roles=frozenset({"admin"}),
-            scopes=frozenset({"*"}),
-            auth_method="api_key",
-        )
-        _bind_principal(request, principal, settings)
-        return principal
+    if expected and provided_key:
+        try:
+            if hmac.compare_digest(provided_key, expected):
+                principal = Principal(
+                    subject="api-key-client",
+                    tenant_id="default",
+                    roles=frozenset({"admin"}),
+                    scopes=frozenset({"*"}),
+                    auth_method="api_key",
+                )
+                _bind_principal(request, principal, settings)
+                return principal
+        except TypeError:
+            pass
     if (
         settings.auth_mode == "auto"
         and expected is None
@@ -271,7 +276,7 @@ async def get_principal(
 
 def require_permission(permission: str) -> Callable:
     async def dependency(
-        request: Request,
+        request: Request | None = None,
         principal: Principal = Depends(get_principal),
     ) -> Principal:
         if not principal.can(permission):
