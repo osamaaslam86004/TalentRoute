@@ -1,10 +1,10 @@
 """Integration tests for ReviewerFeedback database model and foreign keys."""
 
-import uuid
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db.models.reviewer_feedback import ReviewerFeedback
 from app.db.models.screening import Screening
 
@@ -37,9 +37,7 @@ async def test_reviewer_feedback_creation_linked_to_screening(
     db_session.add(review)
     await db_session.flush()
 
-    stmt = select(ReviewerFeedback).where(
-        ReviewerFeedback.screening_id == screening.id
-    )
+    stmt = select(ReviewerFeedback).where(ReviewerFeedback.screening_id == screening.id)
     retrieved_review = await db_session.scalar(stmt)
 
     assert retrieved_review is not None
@@ -78,6 +76,9 @@ async def test_reviewer_feedback_screening_ondelete_set_null(
     # Delete parent Screening
     await db_session.delete(screening)
     await db_session.flush()
+
+    # Expire session identity map so SQLAlchemy fetches the updated NULL value from the DB
+    db_session.expire_all()
 
     retrieved_review = await db_session.scalar(
         select(ReviewerFeedback).where(ReviewerFeedback.id == review_id)
