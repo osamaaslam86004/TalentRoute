@@ -31,7 +31,7 @@ async def test_timestamp_formatting_timezone_aware() -> None:
     assert formatted == "2026-10-28T12:30:45.123456+00:00"
 
     # Test non-UTC timezone conversion to UTC
-    est = timezone(datetime.resolution * 0 - datetime.resolution * 0)  # offset
+    timezone(datetime.resolution * 0 - datetime.resolution * 0)  # offset
     dt_aware = datetime.now(UTC)
     assert _timestamp(dt_aware).endswith("+00:00")
 

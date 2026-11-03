@@ -1,7 +1,7 @@
 """Database integration test fixtures providing isolated async sessions."""
 
 from collections.abc import AsyncGenerator
-import pytest
+
 import pytest_asyncio
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
@@ -10,9 +10,9 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from app.db.base import Base
-import app.db.models  # noqa: F401 - Ensure models are registered
 
+import app.db.models  # noqa: F401 - Ensure models are registered
+from app.db.base import Base
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 

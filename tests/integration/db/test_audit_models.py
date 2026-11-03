@@ -2,10 +2,12 @@
 
 import uuid
 from datetime import UTC, datetime
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.audit.integrity import GENESIS_HASH
 from app.db.models.audit_chain_head import AuditChainHead
 from app.db.models.audit_event import AuditEvent
@@ -34,7 +36,10 @@ async def test_audit_event_persistence_and_bigint_sequence(
         resource_type="screening",
         resource_id=str(uuid.uuid4()),
         outcome="success",
-        event_metadata={"reason": "GDPR erasure request", "requested_by": "privacy_team"},
+        event_metadata={
+            "reason": "GDPR erasure request",
+            "requested_by": "privacy_team",
+        },
     )
 
     db_session.add(event)

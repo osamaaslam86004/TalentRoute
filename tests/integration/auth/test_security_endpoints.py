@@ -2,9 +2,9 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from httpx import AsyncClient
 from pydantic import SecretStr
-import pytest
 
 from app.core.config import Settings
 from app.core.security import Principal
@@ -179,9 +179,7 @@ class TestSecurityDependenciesIntegration:
             auth_method="oidc",
         )
         auth_headers = {"Authorization": "Bearer privacy.jwt"}
-        res = await async_client.delete(
-            "/screenings/sc-100200", headers=auth_headers
-        )
+        res = await async_client.delete("/screenings/sc-100200", headers=auth_headers)
         assert res.status_code == 200
         assert res.json()["status"] == "deleted"
 

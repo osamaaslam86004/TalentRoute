@@ -1,4 +1,5 @@
 """Unit and integration tests for telemetry header filtering (app/workers/telemetry.py)."""
+
 from __future__ import annotations
 
 from app.workers.telemetry import build_task_headers

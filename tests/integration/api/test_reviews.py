@@ -113,7 +113,10 @@ async def test_list_feedback_history(
     # Submit second feedback entry
     await reviewer_client_tenant_a.post(
         f"/api/v1/screenings/{screening_id}/feedback",
-        json={"label": "override_recommendation", "reason_codes": ["role_requirement_mismatch"]},
+        json={
+            "label": "override_recommendation",
+            "reason_codes": ["role_requirement_mismatch"],
+        },
     )
 
     res = await reviewer_client_tenant_a.get(

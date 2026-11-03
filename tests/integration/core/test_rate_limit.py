@@ -1,4 +1,5 @@
 """Unit and integration tests for app/core/rate_limit.py Redis Lua rate limiter."""
+
 from __future__ import annotations
 
 import hashlib
@@ -138,8 +139,6 @@ class TestScreeningRateLimiter:
     async def test_close_rate_limit_client(self) -> None:
         """Verify close_rate_limit_client closes Redis connection and clears cache."""
         mock_redis = AsyncMock()
-        with patch(
-            "app.core.rate_limit._redis_client", return_value=mock_redis
-        ) as mock_get_client:
+        with patch("app.core.rate_limit._redis_client", return_value=mock_redis):
             await close_rate_limit_client()
             mock_redis.aclose.assert_called_once()

@@ -2,9 +2,11 @@
 
 import uuid
 from datetime import UTC, datetime
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db.models.outbox_event import OutboxEvent
 
 

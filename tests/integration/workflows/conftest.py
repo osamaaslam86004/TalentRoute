@@ -1,14 +1,15 @@
 """Fixtures and mock provider stubs for LangGraph screening workflow integration tests."""
 
 from typing import Any
+
 import pytest
+
 from app.schemas.assessment import (
     ExperienceAssessment,
     ExperienceLevel,
     SkillMatch,
     SkillsAssessment,
 )
-from app.workflows.screening.providers import AssessmentProvider
 from app.workflows.screening.state import ScreeningState
 
 
@@ -36,12 +37,8 @@ class MockAssessmentProvider:
         self.assess_experience_calls: list[dict[str, Any]] = []
         self.assess_skills_calls: list[dict[str, Any]] = []
 
-    async def assess_experience(
-        self, application_text: str
-    ) -> ExperienceAssessment:
-        self.assess_experience_calls.append(
-            {"application_text": application_text}
-        )
+    async def assess_experience(self, application_text: str) -> ExperienceAssessment:
+        self.assess_experience_calls.append({"application_text": application_text})
         return self.experience_assessment
 
     async def assess_skills(

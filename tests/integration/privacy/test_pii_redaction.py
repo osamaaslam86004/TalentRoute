@@ -24,7 +24,7 @@ def test_redact_pii_invalid_policy() -> None:
 
 
 def test_redact_pii_baseline_structured_fields(
-    sample_pii_texts: dict[str, str]
+    sample_pii_texts: dict[str, str],
 ) -> None:
     """Verify baseline policy masks email, phone, government ID, names, and address."""
     text = (
@@ -66,7 +66,7 @@ def test_redact_pii_baseline_structured_fields(
 
 
 def test_redact_pii_strict_policy_unlabelled_address(
-    sample_pii_texts: dict[str, str]
+    sample_pii_texts: dict[str, str],
 ) -> None:
     """Verify strict policy catches unlabelled street address patterns."""
     raw_address = sample_pii_texts["unlabelled_street_address"]
@@ -85,9 +85,7 @@ def test_redact_pii_strict_policy_unlabelled_address(
     assert "123 Main Street" not in strict_result.text
 
 
-def test_redact_pii_clean_text_no_redactions(
-    sample_pii_texts: dict[str, str]
-) -> None:
+def test_redact_pii_clean_text_no_redactions(sample_pii_texts: dict[str, str]) -> None:
     """Verify clean text returns changed=False and empty counts."""
     clean = sample_pii_texts["clean_text"]
     result = redact_pii(clean, enabled=True, policy="strict")

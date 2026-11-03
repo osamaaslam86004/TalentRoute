@@ -2,10 +2,12 @@
 
 import uuid
 from datetime import UTC, datetime
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db.models.screening import Screening
 
 

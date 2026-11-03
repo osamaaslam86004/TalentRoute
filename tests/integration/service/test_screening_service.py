@@ -93,14 +93,18 @@ async def test_process_screening_success_flow(
         assert updated.skills_match == "Match"
         assert updated.skills_confidence == 0.95
         assert updated.recommendation == "hr_review"
-        assert updated.recommendation_reason == "Excellent match for senior backend role."
+        assert (
+            updated.recommendation_reason == "Excellent match for senior backend role."
+        )
         assert updated.human_review_required is True
         assert updated.processed_at is not None
         assert updated.error_code is None
 
         # Verify PII redaction summary was stored
         assert updated.redaction_summary is not None
-        assert "email" in updated.redaction_summary or "phone" in updated.redaction_summary
+        assert (
+            "email" in updated.redaction_summary or "phone" in updated.redaction_summary
+        )
 
         # Verify audit event was created
         audit_event = await session.scalar(
@@ -162,9 +166,9 @@ async def test_process_screening_failure_handling(
             "app.services.screening_service.create_screening_graph",
             return_value=mock_graph,
         ),
+        pytest.raises(RuntimeError, match="LLM provider timeout error"),
     ):
-        with pytest.raises(RuntimeError, match="LLM provider timeout error"):
-            await process_screening(pending_screening.id)
+        await process_screening(pending_screening.id)
 
     # Inspect persisted screening and audit state
     async with session_factory() as session:

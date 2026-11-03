@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import select
 
 from app.db.models.outbox_event import OutboxEvent
 from app.workers.outbox import (
     _claim_batch,
     _dispatch_once,
-    _mark_dispatched,
     _mark_failed,
     dispatch_pending_outbox,
 )
@@ -97,7 +95,7 @@ async def test_outbox_dispatch_failure_retry_and_dead_letter(
     """Verify outbox error handling for task dispatch failures and terminal max attempts."""
     monkeypatch.setattr("app.workers.outbox.AsyncSessionLocal", session_factory)
 
-    event_id = str(uuid.uuid4())
+    str(uuid.uuid4())
     event = make_outbox_event(
         tenant_id="tenant_a",
         event_type="screening.requested",

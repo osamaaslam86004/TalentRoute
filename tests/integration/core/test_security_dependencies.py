@@ -1,4 +1,5 @@
 """Integration tests for app/core/security.py get_principal and require_permission dependencies."""
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -83,7 +84,9 @@ class TestSecurityDependenciesIntegration:
             auth_method="oidc",
         )
         try:
-            core_test_app.dependency_overrides[get_principal] = lambda: recruiter_principal
+            core_test_app.dependency_overrides[get_principal] = lambda: (
+                recruiter_principal
+            )
             response = await async_core_client.post("/api/v1/screenings")
             assert response.status_code == status.HTTP_200_OK
             assert response.json() == {
@@ -106,7 +109,9 @@ class TestSecurityDependenciesIntegration:
             auth_method="oidc",
         )
         try:
-            core_test_app.dependency_overrides[get_principal] = lambda: reviewer_principal
+            core_test_app.dependency_overrides[get_principal] = lambda: (
+                reviewer_principal
+            )
             # Reviewer attempting to delete a screening (requires screening:delete)
             response = await async_core_client.delete(
                 "/api/v1/screenings/screening-123"

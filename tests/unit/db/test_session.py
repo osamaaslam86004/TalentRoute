@@ -63,7 +63,7 @@ async def test_get_db_sqlalchemy_error_rollback():
 
     with patch("app.db.session.async_session_maker", mock_session_maker):
         gen = get_db()
-        session = await anext(gen)
+        await anext(gen)
         with pytest.raises(SQLAlchemyError):
             await gen.athrow(SQLAlchemyError("Integrity constraint violation"))
 

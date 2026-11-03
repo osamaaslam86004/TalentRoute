@@ -24,9 +24,7 @@ async def test_create_screening_success(
         "job_title": "Principal Backend Engineer",
         "required_skills": ["Python", "FastAPI", "SQLAlchemy"],
     }
-    response = await recruiter_client_tenant_a.post(
-        "/api/v1/screenings", json=payload
-    )
+    response = await recruiter_client_tenant_a.post("/api/v1/screenings", json=payload)
     assert response.status_code == 202
     data = response.json()
     assert "id" in data
@@ -57,9 +55,7 @@ async def test_create_screening_payload_size_limit(
         "job_title": "Python Developer",
         "required_skills": ["Python"],
     }
-    response = await recruiter_client_tenant_a.post(
-        "/api/v1/screenings", json=payload
-    )
+    response = await recruiter_client_tenant_a.post("/api/v1/screenings", json=payload)
     assert response.status_code == 413
     assert "exceeds configured limit" in response.json()["detail"]
 
@@ -164,9 +160,7 @@ async def test_get_screening_detail_success(
     )
     screening_id = create_res.json()["id"]
 
-    response = await recruiter_client_tenant_a.get(
-        f"/api/v1/screenings/{screening_id}"
-    )
+    response = await recruiter_client_tenant_a.get(f"/api/v1/screenings/{screening_id}")
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == screening_id
@@ -179,9 +173,7 @@ async def test_get_screening_detail_not_found(
 ) -> None:
     """Verify HTTP 404 for nonexistent screening ID."""
     random_id = uuid.uuid4()
-    response = await recruiter_client_tenant_a.get(
-        f"/api/v1/screenings/{random_id}"
-    )
+    response = await recruiter_client_tenant_a.get(f"/api/v1/screenings/{random_id}")
     assert response.status_code == 404
 
 

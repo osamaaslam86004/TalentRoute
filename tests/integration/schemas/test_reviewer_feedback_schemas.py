@@ -1,6 +1,7 @@
 """Integration tests for reviewer feedback schemas, reason codes, ORM round-trips, and endpoint payloads."""
 
 import uuid
+
 import pytest
 from httpx import AsyncClient
 from pydantic import ValidationError
@@ -9,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.reviewer_feedback import ReviewerFeedback
 from app.db.models.screening import Screening
 from app.schemas.reviewer_feedback import (
-    ALLOWED_REASON_CODES,
     AppealCreate,
     AppealOutcome,
     ReviewerFeedbackCreate,

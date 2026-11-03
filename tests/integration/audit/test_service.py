@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import pytest
@@ -17,7 +16,6 @@ from app.audit.service import (
 )
 from app.core.security import Principal
 from app.db.models.audit_chain_head import AuditChainHead
-from app.db.models.audit_event import AuditEvent
 
 
 @pytest.mark.asyncio
@@ -157,7 +155,12 @@ async def test_list_audit_events_pagination_and_filtering(
 ) -> None:
     """Verify list_audit_events filters by tenant_id, action, and handles pagination."""
     # Seed events for tenant-a
-    actions = ["screening.created", "screening.read", "screening.created", "review.submitted"]
+    actions = [
+        "screening.created",
+        "screening.read",
+        "screening.created",
+        "review.submitted",
+    ]
     for idx, act in enumerate(actions, start=1):
         await record_audit_event(
             db_session,
@@ -170,7 +173,9 @@ async def test_list_audit_events_pagination_and_filtering(
     await db_session.commit()
 
     # List all events for tenant-a
-    items, total = await list_audit_events(db_session, tenant_id="tenant-a", limit=10, offset=0)
+    items, total = await list_audit_events(
+        db_session, tenant_id="tenant-a", limit=10, offset=0
+    )
     assert total == 4
     assert len(items) == 4
 

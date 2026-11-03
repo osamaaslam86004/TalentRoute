@@ -24,7 +24,7 @@ class TestJSONLAndJSONUtils:
         file_path = tmp_path / "dataset.jsonl"
         content = (
             '{"case_id": "c1", "gold": {"experience_level": "Senior-level"}}\n'
-            '\n'
+            "\n"
             '{"case_id": "c2", "gold": {"experience_level": "Entry-level"}}\n'
         )
         file_path.write_text(content, encoding="utf-8")
@@ -35,15 +35,10 @@ class TestJSONLAndJSONUtils:
         assert rows[0]["case_id"] == "c1"
         assert rows[1]["case_id"] == "c2"
 
-    def test_load_jsonl_invalid_json_raises_value_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_load_jsonl_invalid_json_raises_value_error(self, tmp_path: Path) -> None:
         """Verify that malformed JSON lines raise a descriptive ValueError with line number."""
         file_path = tmp_path / "corrupted.jsonl"
-        content = (
-            '{"case_id": "c1"}\n'
-            '{"case_id": "c2", BROKEN_JSON}\n'
-        )
+        content = '{"case_id": "c1"}\n{"case_id": "c2", BROKEN_JSON}\n'
         file_path.write_text(content, encoding="utf-8")
 
         with pytest.raises(ValueError, match="Invalid JSONL at .*corrupted.jsonl:2"):
@@ -56,9 +51,7 @@ class TestJSONLAndJSONUtils:
         file_path = tmp_path / "scalar.jsonl"
         file_path.write_text('"just a string"\n', encoding="utf-8")
 
-        with pytest.raises(
-            ValueError, match="Each JSONL record must be an object"
-        ):
+        with pytest.raises(ValueError, match="Each JSONL record must be an object"):
             load_jsonl(file_path)
 
     def test_write_json(self, tmp_path: Path) -> None:
@@ -240,11 +233,15 @@ class TestEvaluatePredictions:
 class TestCompareReportsReleaseGate:
     """Test suite for conservative release gate evaluation and threshold regression catching."""
 
-    def test_compare_reports_passing(self, baseline_eval_report: dict[str, Any]) -> None:
+    def test_compare_reports_passing(
+        self, baseline_eval_report: dict[str, Any]
+    ) -> None:
         """Verify that comparing identical or improved candidate reports returns passed=True."""
         candidate_report = dict(baseline_eval_report)
 
-        gate = compare_reports(baseline=baseline_eval_report, candidate=candidate_report)
+        gate = compare_reports(
+            baseline=baseline_eval_report, candidate=candidate_report
+        )
 
         assert gate["passed"] is True
         assert gate["failures"] == []
@@ -318,7 +315,9 @@ class TestCompareReportsReleaseGate:
         )
 
         assert gate["passed"] is False
-        assert any("candidate slice gap for experience_accuracy" in f for f in gate["failures"])
+        assert any(
+            "candidate slice gap for experience_accuracy" in f for f in gate["failures"]
+        )
 
     def test_compare_reports_distribution_shift_failure(
         self, baseline_eval_report: dict[str, Any]
@@ -354,7 +353,9 @@ class TestCompareReportsReleaseGate:
         candidate = dict(baseline_eval_report)
         candidate["metrics"] = dict(baseline_eval_report["metrics"])
         candidate["metrics"]["mean_latency_ms"] = 1500.0  # 50% increase > 25% threshold
-        candidate["metrics"]["mean_estimated_cost_usd"] = 0.008  # 100% increase > 25% threshold
+        candidate["metrics"]["mean_estimated_cost_usd"] = (
+            0.008  # 100% increase > 25% threshold
+        )
 
         gate = compare_reports(
             baseline=baseline_eval_report,
@@ -365,4 +366,6 @@ class TestCompareReportsReleaseGate:
 
         assert gate["passed"] is False
         assert any("mean latency increased by 50.0%" in f for f in gate["failures"])
-        assert any("mean estimated cost increased by 100.0%" in f for f in gate["failures"])
+        assert any(
+            "mean estimated cost increased by 100.0%" in f for f in gate["failures"]
+        )
