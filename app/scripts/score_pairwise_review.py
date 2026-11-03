@@ -6,7 +6,9 @@ import json
 from pathlib import Path
 
 from app.evaluation.evaluation_pipeline import write_json
-from app.evaluation.pairwise_blinding import score_blinded_judgments
+from app.evaluation.pairwise_blinding import (
+    score_blinded_judgments,
+)
 
 
 def main() -> int:
