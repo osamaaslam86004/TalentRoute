@@ -5,8 +5,6 @@ from app.db.session import configure_worker_db
 from app.observability.policy import enforce_langsmith_policy
 
 configure_worker_db()
-
-
 settings = get_settings()
 # Worker and beat both import this module; refuse to start with third-party LLM tracing enabled.
 enforce_langsmith_policy(settings)

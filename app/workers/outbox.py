@@ -23,13 +23,29 @@ from app.workers.telemetry import build_task_headers
 logger = logging.getLogger(__name__)
 
 
+def _run_async(coro_fn_or_coro):
+    """Safely run a coroutine or callable whether an event loop is already running or not."""
+    res = coro_fn_or_coro() if callable(coro_fn_or_coro) else coro_fn_or_coro
+    if not asyncio.iscoroutine(res):
+        return res
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(asyncio.run, res).result()
+    else:
+        return asyncio.run(res)
+
+
 async def _claim_batch(limit: int) -> list[tuple[str, str, str, dict, int]]:
-
     settings = get_settings()
-
     now = datetime.now(UTC)
     stale_before = now - timedelta(seconds=settings.outbox_lease_seconds)
-
     async with AsyncSessionLocal() as session:
         expired_result = await session.execute(
             update(OutboxEvent)
@@ -74,17 +90,13 @@ async def _claim_batch(limit: int) -> list[tuple[str, str, str, dict, int]]:
             .limit(limit)
             .with_for_update(skip_locked=True)
         )
-
         rows = list((await session.scalars(statement)).all())
-
         for row in rows:
             row.status = "dispatching"
             row.locked_at = now
             row.attempt_count += 1
             row.last_error_code = None
-
         await session.commit()
-
         if rows:
             record_pipeline_event(
                 "outbox.claimed",
@@ -100,7 +112,6 @@ async def _claim_batch(limit: int) -> list[tuple[str, str, str, dict, int]]:
                 )
             except Exception:
                 pass
-
         return [
             (
                 str(row.id),
@@ -116,7 +127,6 @@ async def _claim_batch(limit: int) -> list[tuple[str, str, str, dict, int]]:
 async def _mark_dispatched(event_id: str) -> None:
     async with AsyncSessionLocal() as session:
         row = await session.get(OutboxEvent, uuid.UUID(event_id), with_for_update=True)
-
         if row is not None:
             row.status = "dispatched"
             row.dispatched_at = datetime.now(UTC)
@@ -133,14 +143,11 @@ async def _mark_dispatched(event_id: str) -> None:
 
 async def _mark_failed(event_id: str, attempt_count: int, exception_type: str) -> None:
     settings = get_settings()
-
     now = datetime.now(UTC)
     is_dead = attempt_count >= settings.outbox_max_attempts
     delay_seconds = min(2 ** min(attempt_count, 8), 300)
-
     async with AsyncSessionLocal() as session:
         row = await session.get(OutboxEvent, uuid.UUID(event_id), with_for_update=True)
-
         if row is not None:
             row.status = "dead" if is_dead else "pending"
             row.locked_at = None
@@ -154,7 +161,6 @@ async def _mark_failed(event_id: str, attempt_count: int, exception_type: str) -
                 error_type=exception_type[:64],
                 status=row.status,
             )
-
     logger.error(
         "outbox dispatch failed event_id=%s attempt=%s terminal=%s error_type=%s",
         event_id,
@@ -166,20 +172,16 @@ async def _mark_failed(event_id: str, attempt_count: int, exception_type: str) -
 
 async def _dispatch_once_inner() -> dict[str, int]:
     settings = get_settings()
-
     batch = await _claim_batch(settings.outbox_batch_size)
     dispatched = 0
     failed = 0
-
     for event_id, tenant_id, event_type, payload, attempt_count in batch:
         try:
             if event_type != "screening.requested":
                 raise ValueError("unsupported_event_type")
-
             screening_id = str(uuid.UUID(str(payload["screening_id"])))
             enqueued_at = payload.get("enqueued_at")
             queued_at: datetime | None = None
-
             if isinstance(enqueued_at, str):
                 try:
                     parsed = datetime.fromisoformat(enqueued_at.replace("Z", "+00:00"))
@@ -189,7 +191,6 @@ async def _dispatch_once_inner() -> dict[str, int]:
             headers = build_task_headers(
                 payload, tenant_id=tenant_id, event_id=event_id
             )
-
             with traced_stage(
                 "outbox.dispatch",
                 screening_id=screening_id,
@@ -198,18 +199,15 @@ async def _dispatch_once_inner() -> dict[str, int]:
                 screen_candidate.apply_async(
                     args=[screening_id], task_id=event_id, headers=headers
                 )
-
             if queued_at is not None:
                 record_outbox_dispatch_lag(
                     max(0.0, (datetime.now(UTC) - queued_at).total_seconds())
                 )
             await _mark_dispatched(event_id)
             dispatched += 1
-
         except Exception as exc:
             await _mark_failed(event_id, attempt_count, type(exc).__name__)
             failed += 1
-
     if batch:
         logger.info(
             "outbox batch complete claimed=%s dispatched=%s failed=%s",
@@ -217,7 +215,6 @@ async def _dispatch_once_inner() -> dict[str, int]:
             dispatched,
             failed,
         )
-
     return {"claimed": len(batch), "dispatched": dispatched, "failed": failed}
 
 
@@ -231,7 +228,7 @@ async def _dispatch_once() -> dict[str, int]:
 def dispatch_pending_outbox() -> dict[str, int]:
     """Dispatch one bounded outbox batch. Celery Beat schedules this task."""
     try:
-        return asyncio.run(_dispatch_once())
+        return _run_async(_dispatch_once)
     finally:
         try:
             from app.db.session import worker_engine

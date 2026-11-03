@@ -1,4 +1,5 @@
 """Integration tests for pipeline statistics collector (app/workers/pipeline_stats.py)."""
+
 from __future__ import annotations
 
 import uuid
@@ -80,14 +81,16 @@ async def test_collect_pipeline_statistics(db_session: AsyncSession):
         status="dead",
         created_at=now - timedelta(seconds=120),
     )
-    db_session.add_all([
-        old_dispatched,
-        recent_dispatched,
-        pending_1,
-        pending_2,
-        dispatching_1,
-        dead_1,
-    ])
+    db_session.add_all(
+        [
+            old_dispatched,
+            recent_dispatched,
+            pending_1,
+            pending_2,
+            dispatching_1,
+            dead_1,
+        ]
+    )
 
     # 2. Seed screenings
     screening_running_1 = Screening(
@@ -116,11 +119,13 @@ async def test_collect_pipeline_statistics(db_session: AsyncSession):
         job_title="Frontend Developer",
         required_skills=["React"],
     )
-    db_session.add_all([
-        screening_running_1,
-        screening_running_2,
-        screening_completed,
-    ])
+    db_session.add_all(
+        [
+            screening_running_1,
+            screening_running_2,
+            screening_completed,
+        ]
+    )
     await db_session.commit()
 
     # 3. Mock Redis client
@@ -132,7 +137,8 @@ async def test_collect_pipeline_statistics(db_session: AsyncSession):
         "app.workers.pipeline_stats.get_rate_limit_redis_client",
         return_value=mock_redis,
     ):
-        stats = await collect_pipeline_statistics()
+        # Pass db_session so it runs inside the test transaction
+        stats = await collect_pipeline_statistics(db_session)
 
     # 4. Verify assertions
     assert stats["outbox_pending"] == 2
@@ -163,11 +169,13 @@ async def test_collect_pipeline_statistics_redis_failure(
         "app.workers.pipeline_stats.get_rate_limit_redis_client",
         return_value=mock_redis,
     ):
-        stats = await collect_pipeline_statistics()
+        # Pass db_session so it runs inside the test transaction
+        stats = await collect_pipeline_statistics(db_session)
 
-    assert "redis_celery_queue_length" not in stats or stats.get(
-        "dispatcher_heartbeat_present"
-    ) == 0
+    assert (
+        "redis_celery_queue_length" not in stats
+        or stats.get("dispatcher_heartbeat_present") == 0
+    )
     assert stats["outbox_pending"] == 0
     assert stats["outbox_dead"] == 0
 
