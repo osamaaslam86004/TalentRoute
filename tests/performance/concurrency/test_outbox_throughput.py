@@ -18,6 +18,12 @@ async def test_outbox_batch_claim_throughput_and_skip_locked(
     perf_session_factory, tenant_a: str
 ):
     """Seed 200 pending outbox events and test concurrent batch claiming with skip_locked=True."""
+    # Skip if running on SQLite (which does not support SKIP LOCKED)
+    async with perf_session_factory() as session:
+        dialect_name = session.bind.dialect.name if session.bind else ""
+        if dialect_name == "sqlite":
+            pytest.skip("Outbox throughput & SKIP LOCKED tests require PostgreSQL")
+
     event_count = 200
 
     # Seed pending outbox events
