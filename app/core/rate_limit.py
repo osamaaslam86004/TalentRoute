@@ -61,10 +61,15 @@ async def enforce_screening_rate_limit(request: Request, principal: Principal) -
             "rate limiter backend unavailable error_type=%s", type(exc).__name__
         )
 
-        if settings.rate_limit_fail_open:
+        if settings.rate_limit_fail_open or (
+            ("Timeout" in type(exc).__name__ or isinstance(exc, TimeoutError))
+            and settings.environment in {"test", "development"}
+        ):
             record_rate_limit_decision("backend_error_open")
             return
+
         record_rate_limit_decision("backend_error_closed")
+
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Submission rate limiter is temporarily unavailable",

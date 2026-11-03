@@ -1,11 +1,11 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class AuditEventRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
     id: uuid.UUID
     occurred_at: datetime
     tenant_id: str
@@ -19,7 +19,10 @@ class AuditEventRead(BaseModel):
     resource_type: str
     resource_id: str | None
     outcome: str
-    event_metadata: dict[str, object] = Field(serialization_alias="metadata")
+    event_metadata: dict[str, object] = Field(
+        validation_alias=AliasChoices("event_metadata", "metadata"),
+        serialization_alias="metadata",
+    )
 
 
 class AuditEventList(BaseModel):
