@@ -39,24 +39,24 @@ def create_screening_graph(provider: AssessmentProvider | None = None):
     def hr_review(_: ScreeningState) -> dict:
         return {
             "recommendation": Recommendation.HR_REVIEW,
-            "recommendation_reason": "Skills evidence supports prioritizing a human HR \
-                review; no hiring decision has been made.",
+            "recommendation_reason": "Skills evidence supports prioritizing a human HR review;"
+            "no hiring decision has been made.",
             "human_review_required": True,
         }
 
     def recruiter_review(_: ScreeningState) -> dict:
         return {
             "recommendation": Recommendation.RECRUITER_REVIEW,
-            "recommendation_reason": "Experience appears senior while required-skill evidence \
-                is incomplete or not matched; recruiter review is suggested.",
+            "recommendation_reason": "Experience appears senior while required-skill evidence"
+            "is incomplete or not matched; recruiter review is suggested.",
             "human_review_required": True,
         }
 
     def manual_review(_: ScreeningState) -> dict:
         return {
             "recommendation": Recommendation.MANUAL_REVIEW,
-            "recommendation_reason": "Evidence is insufficient or does not clearly support the \
-                other review routes; qualified human review is required.",
+            "recommendation_reason": "Evidence is insufficient or does not clearly support the"
+            "other review routes; qualified human review is required.",
             "human_review_required": True,
         }
 

@@ -1,5 +1,5 @@
 import json
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from langchain_openai import ChatOpenAI
 
@@ -11,6 +11,7 @@ from app.workflows.screening.prompts import (
 )
 
 
+@runtime_checkable
 class AssessmentProvider(Protocol):
     async def assess_experience(
         self, application_text: str
