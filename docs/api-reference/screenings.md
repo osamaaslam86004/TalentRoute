@@ -1,51 +1,75 @@
 # Screenings API Endpoint Reference
 
-The `/api/v1/screenings` resource manages candidate application submissions, background evaluations, and data retention deletion.
+The `/api/v1/screenings` endpoint manages candidate application submissions, asynchronous evaluation status polling, listing, and GDPR/CCPA data erasure.
+
+---
+
+## Endpoint Summary
+
+| HTTP Method | Path | Permission Required | Description |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/screenings` | `screening:write` | Submit a candidate application for async screening. |
+| `GET` | `/api/v1/screenings` | `screening:read` | List candidate screening records for the tenant. |
+| `GET` | `/api/v1/screenings/{screening_id}` | `screening:read` | Retrieve detailed screening results and status. |
+| `DELETE` | `/api/v1/screenings/{screening_id}` | `screening:delete` | Hard delete a screening record (GDPR/CCPA compliance). |
 
 ---
 
 ## 1. Submit Screening Application (`POST /api/v1/screenings`)
 
-Submits a candidate resume/application for asynchronous screening.
+Submits candidate application text for asynchronous background evaluation.
 
-- **Permission Required:** `screening:write` (`recruiter`, `service`, `admin`)
-- **Status Code:** `202 Accepted`
+- **HTTP Status Code:** `202 Accepted`
+- **RBAC Roles Allowed:** `recruiter`, `service`, `admin`
 
 ### Request Headers
 ```http
 POST /api/v1/screenings HTTP/1.1
 Host: api.screening.example.com
-Authorization: Bearer <JWT>
+Authorization: Bearer <OIDC_JWT_TOKEN>
 Content-Type: application/json
-Idempotency-Key: submission-req-2026-9901
+Idempotency-Key: submission-2026-11-01-001
 ```
 
-### Request Body (`ScreeningCreateRequest`)
+### Request Body Schema (`ScreeningCreateRequest`)
+
+| Field Name | Type | Required | Validation Rules | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `application_text` | `string` | Yes | Min 20, max 1,000,000 chars (also constrained by `MAX_APPLICATION_CHARS`) | Full raw text of candidate resume or application submission. Stripped of leading/trailing whitespace. |
+| `job_title` | `string` | No | Default `"Python Developer"`, min 2, max 160 chars | Target job title for skill evaluation. |
+| `required_skills` | `list[string]` | No | Default `["Python"]`, min 1, max 30 items, each 1-500 chars | List of required technical or domain skill names. Automatically deduplicated. |
+
+#### Request Payload Example
 ```json
 {
-  "application_text": "Experienced Software Engineer with 6+ years in Python, AsyncIO, PostgreSQL, and AWS...",
-  "job_title": "Senior Backend Platform Engineer",
-  "required_skills": [
-    "Python",
-    "FastAPI",
-    "PostgreSQL",
-    "Distributed Systems"
-  ]
+  "job_title": "Senior Python Developer",
+  "required_skills": ["Python", "FastAPI", "PostgreSQL", "AsyncIO"],
+  "application_text": "Senior Software Engineer with 6 years experience in Python, FastAPI, PostgreSQL, and AsyncIO microservices..."
 }
 ```
 
 ### Response Payload (`ScreeningAccepted`)
 ```json
 {
-  "id": "7f3c2b1a-8e9d-4c5b-a1b2-c3d4e5f6a7b8",
-  "status": "pending",
-  "created_at": "2026-11-01T04:50:00.123456Z"
+  "id": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+  "status": "queued",
+  "poll_url": "http://api.screening.example.com/api/v1/screenings/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d"
 }
 ```
 
-### Special Error Behaviors
-- **`413 Payload Too Large`:** Returned if `len(application_text) > MAX_APPLICATION_CHARS`.
-- **`409 Conflict`:** Returned if an `Idempotency-Key` is re-sent with a modified request payload fingerprint. Re-sending identical payloads returns the original `202 Accepted` object.
+---
+
+## Idempotency & Rate Limit Behavior
+
+### Idempotency Key Processing (`Idempotency-Key`)
+1. Calculates SHA-256 fingerprint of `ScreeningCreateRequest` body.
+2. If `Idempotency-Key` exists for tenant:
+   - If payload fingerprint matches: returns `HTTP 202 Accepted` with existing record ID and status.
+   - If payload fingerprint differs: raises `HTTP 409 Conflict` ("Idempotency-Key has already been used with a different request").
+
+### Limit Enforcement
+- **Payload Character Limit (`413`):** If `len(application_text) > MAX_APPLICATION_CHARS` (default 30,000), returns `413 Payload Too Large`.
+- **Submission Rate Limiting (`429`):** Evaluated against Redis quota (`SCREENING_RATE_LIMIT_REQUESTS` per `SCREENING_RATE_LIMIT_WINDOW_SECONDS`). Exceeding quota returns `429 Too Many Requests` with `Retry-After` header.
 
 ---
 
@@ -53,21 +77,37 @@ Idempotency-Key: submission-req-2026-9901
 
 Retrieves paginated screening records for the authenticated tenant.
 
-- **Permission Required:** `screening:read`
-- **Query Parameters:**
-  - `limit` (`int`, default `50`, min `1`, max `100`)
-  - `offset` (`int`, default `0`, min `0`)
+- **HTTP Status Code:** `200 OK`
+- **RBAC Roles Allowed:** `recruiter`, `reviewer`, `auditor`, `privacy_officer`, `admin`
+
+### Query Parameters
+
+| Parameter | Type | Default | Constraints | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `limit` | `integer` | `50` | Min 1, max 100 | Number of records to return per page. |
+| `offset` | `integer` | `0` | Min 0 | Pagination offset count. |
 
 ### Response Payload (`ScreeningList`)
 ```json
 {
   "items": [
     {
-      "id": "7f3c2b1a-8e9d-4c5b-a1b2-c3d4e5f6a7b8",
-      "status": "processed",
-      "job_title": "Senior Backend Platform Engineer",
+      "id": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+      "status": "completed",
+      "job_title": "Senior Python Developer",
+      "required_skills": ["Python", "FastAPI"],
+      "experience_level": "Senior-level",
+      "experience_confidence": 0.95,
+      "skills_match": "Match",
+      "skills_confidence": 0.92,
       "recommendation": "hr_review",
-      "created_at": "2026-11-01T04:50:00.123456Z"
+      "recommendation_reason": "Skills evidence supports prioritizing a human HR review; no hiring decision has been made.",
+      "human_review_required": true,
+      "model_version": "gpt-4o-mini",
+      "prompt_version": "screening-v1.0.0",
+      "attempt_count": 1,
+      "created_at": "2026-11-02T12:00:00Z",
+      "updated_at": "2026-11-02T12:00:15Z"
     }
   ],
   "limit": 50,
@@ -78,55 +118,54 @@ Retrieves paginated screening records for the authenticated tenant.
 
 ---
 
-## 3. Get Screening Detail (`GET /api/v1/screenings/{screening_id}`)
+## 3. Get Screening Details (`GET /api/v1/screenings/{screening_id}`)
 
-Retrieves full screening evaluation details, structured assessments, and rationale.
+Retrieves complete assessment details and processing status for a single screening.
 
-- **Permission Required:** `screening:read`
+- **HTTP Status Code:** `200 OK`
+- **RBAC Roles Allowed:** `recruiter`, `reviewer`, `auditor`, `privacy_officer`, `admin`
 
 ### Response Payload (`ScreeningRead`)
 ```json
 {
-  "id": "7f3c2b1a-8e9d-4c5b-a1b2-c3d4e5f6a7b8",
-  "tenant_id": "tenant-corp-alpha",
-  "status": "processed",
-  "job_title": "Senior Backend Platform Engineer",
-  "required_skills": ["Python", "FastAPI", "PostgreSQL", "Distributed Systems"],
+  "id": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+  "status": "completed",
+  "job_title": "Senior Python Developer",
+  "required_skills": ["Python", "FastAPI", "PostgreSQL"],
+  "experience_level": "Senior-level",
+  "experience_confidence": 0.95,
+  "experience_evidence": ["Software Engineer with 6 years experience in Python"],
+  "skills_match": "Match",
+  "skills_confidence": 0.92,
+  "skills_evidence": ["6 years experience building FastAPI microservices"],
+  "skill_gaps": [],
   "recommendation": "hr_review",
   "recommendation_reason": "Skills evidence supports prioritizing a human HR review; no hiring decision has been made.",
   "human_review_required": true,
-  "experience_assessment": {
-    "level": "Senior-level",
-    "confidence": 0.88,
-    "evidence": ["6+ years in Python, AsyncIO, PostgreSQL"],
-    "rationale": "Explicit work history confirms senior-level engineering experience."
-  },
-  "skills_assessment": {
-    "match": "Match",
-    "confidence": 0.92,
-    "evidence": ["Python", "PostgreSQL", "FastAPI"],
-    "gaps": [],
-    "rationale": "Direct evidence present for all essential backend role skills."
-  },
-  "prompt_version": "screening-prompts-v1.1.0",
-  "rubric_version": "screening-rubric-v1",
-  "created_at": "2026-11-01T04:50:00.123456Z",
-  "updated_at": "2026-11-01T04:50:12.654321Z"
+  "model_version": "gpt-4o-mini",
+  "prompt_version": "screening-v1.0.0",
+  "redaction_summary": {"email": 1, "phone": 1},
+  "error_code": null,
+  "attempt_count": 1,
+  "created_at": "2026-11-02T12:00:00Z",
+  "updated_at": "2026-11-02T12:00:15Z",
+  "processed_at": "2026-11-02T12:00:15Z"
 }
 ```
 
 ---
 
-## 4. Delete Screening (`DELETE /api/v1/screenings/{screening_id}`)
+## 4. Delete Screening Record (`DELETE /api/v1/screenings/{screening_id}`)
 
-Hard deletes screening records for privacy erasure compliance (GDPR/CCPA).
+Hard deletes a candidate screening record to comply with GDPR/CCPA data erasure requests.
 
-- **Permission Required:** `screening:delete` (`privacy_officer` role)
-- **Status Code:** `204 No Content`
-- **Audit Action Emitted:** `screening.deleted`
+- **HTTP Status Code:** `204 No Content`
+- **RBAC Roles Allowed:** `privacy_officer`, `admin`
+- **Audit Action Logged:** `screening.deleted`
 
 ---
 
 ## Related Documents
-- [API Overview](overview.md)
-- [Human Reviews API](reviews.md)
+- [API Reference Overview](overview.md)
+- [Reviewer Feedback API Reference](reviews.md)
+- [Audit API Reference](audit.md)

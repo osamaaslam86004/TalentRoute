@@ -1,83 +1,102 @@
-# Audit Events API Reference
+# Audit API Endpoint Reference
 
-The `/api/v1/audit-events` resource exposes endpoints for compliance auditing and cryptographic hash-chain verification.
+The `/api/v1/audit-events` endpoints provide access to tenant audit logs and execute cryptographic SHA-256 hash chain verification (`app.api.v1.endpoints.audit` and `app.audit.service`).
 
 ---
 
-## 1. List Audit Events (`GET /api/v1/audit-events`)
+## Endpoint Summary
 
-Retrieves paginated, tenant-isolated audit log events.
+| HTTP Method | Path | Permission Required | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/audit-events/integrity` | `audit:read` | Execute cryptographic SHA-256 hash chain verification for tenant. |
+| `GET` | `/api/v1/audit-events` | `audit:read` | List paginated audit event trail for tenant. |
 
-- **Permission Required:** `audit:read` (`auditor` role)
-- **Query Parameters:**
-  - `limit` (`int`, default `100`, min `1`, max `500`)
-  - `offset` (`int`, default `0`, min `0`)
-  - `action` (`str | None`, max length `120`, e.g. `screening.created`, `review.feedback_submitted`)
+---
 
-### Response Payload (`AuditEventList`)
+## 1. Verify Audit Chain Integrity (`GET /api/v1/audit-events/integrity`)
+
+Scans the tenant's complete audit event ledger sequentially to re-verify cryptographic hash link continuity.
+
+- **HTTP Status Code:** `200 OK`
+- **RBAC Roles Allowed:** `auditor`, `admin`
+- **Audit Action Logged:** `audit.integrity_checked`
+
+### Response Payload Schema (`AuditIntegrityRead`)
+
+| Field Name | Type | Description |
+| :--- | :--- | :--- |
+| `tenant_id` | `string` | Authenticated tenant identifier. |
+| `valid` | `boolean` | `true` if the cryptographic hash chain is unbroken and valid; `false` if tampering or sequence gaps are detected. |
+| `event_count` | `integer` | Total number of audit events recorded for the tenant. |
+| `head_sequence` | `integer` | Latest sequence number locked in `AuditChainHead`. |
+| `first_failure_sequence` | `integer \| null` | Sequence number where integrity failure was detected (`null` if valid). |
+| `failure_reason` | `string \| null` | Diagnostic code detailing cause of failure (`null` if valid). |
+| `head_hash` | `string` | SHA-256 hash digest of the latest event in the chain. |
+
+#### Response Payload Example (Valid Chain)
+```json
+{
+  "tenant_id": "default",
+  "valid": true,
+  "event_count": 42,
+  "head_sequence": 42,
+  "first_failure_sequence": null,
+  "failure_reason": null,
+  "head_hash": "f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9"
+}
+```
+
+---
+
+## 2. List Audit Events (`GET /api/v1/audit-events`)
+
+Retrieves paginated historical audit trail entries for the tenant.
+
+- **HTTP Status Code:** `200 OK`
+- **RBAC Roles Allowed:** `auditor`, `admin`
+- **Audit Action Logged:** `audit.events_read`
+
+### Query Parameters
+
+| Parameter | Type | Default | Constraints | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `limit` | `integer` | `100` | Min 1, max 500 | Page size limit. |
+| `offset` | `integer` | `0` | Min 0 | Pagination offset count. |
+| `action` | `string \| null` | `None` | Max 120 chars | Optional filter by specific action name (e.g., `screening.created`, `review.feedback_submitted`). |
+
+### Response Payload Schema (`AuditEventList`)
+
 ```json
 {
   "items": [
     {
-      "id": "11223344-5566-7788-9900-aabbccddeeff",
-      "sequence_no": 42,
-      "occurred_at": "2026-11-01T04:50:00.125000Z",
-      "tenant_id": "tenant-corp-alpha",
-      "actor_subject": "recruiter-user-101",
+      "id": "d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f9a",
+      "tenant_id": "default",
+      "sequence_no": 1,
+      "occurred_at": "2026-11-02T12:00:00Z",
+      "actor_subject": "recruiter-user-123",
       "actor_roles": ["recruiter"],
-      "request_id": "req-9988776655",
+      "request_id": "c3a4f890-12ab-4cde-8901-23456789abcd",
       "action": "screening.created",
       "resource_type": "screening",
-      "resource_id": "7f3c2b1a-8e9d-4c5b-a1b2-c3d4e5f6a7b8",
+      "resource_id": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
       "outcome": "success",
-      "metadata": {
-        "status": "pending",
-        "prompt_version": "screening-prompts-v1.1.0"
-      },
-      "previous_hash": "3f7a1b8c...",
-      "event_hash": "8e9d0c1b..."
+      "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "event_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "event_metadata": {
+        "status": "queued",
+        "outbox": "pending"
+      }
     }
   ],
   "limit": 100,
   "offset": 0,
-  "count": 42
-}
-```
-
----
-
-## 2. Verify Audit Chain Integrity (`GET /api/v1/audit-events/integrity`)
-
-Cryptographically verifies the SHA-256 hash chain sequence for the tenant.
-
-- **Permission Required:** `audit:read` (`auditor` role)
-
-### Successful Response (`AuditIntegrityRead` - Unbroken Chain)
-```json
-{
-  "valid": true,
-  "event_count": 42,
-  "last_sequence": 42,
-  "last_hash": "8e9d0c1b...",
-  "checked_at": "2026-11-01T05:15:00.000000Z",
-  "error_detail": null
-}
-```
-
-### Failure Response (Tamper Detected)
-```json
-{
-  "valid": false,
-  "event_count": 42,
-  "last_sequence": 18,
-  "last_hash": "1a2b3c4d...",
-  "checked_at": "2026-11-01T05:15:00.000000Z",
-  "error_detail": "Hash mismatch at sequence 19: stored previous_hash does not match sequence 18 event_hash."
+  "count": 1
 }
 ```
 
 ---
 
 ## Related Documents
-- [Audit Chain Architecture](../architecture/audit-chain.md)
-- [Operational Runbooks](../observability/runbooks.md)
+- [API Reference Overview](overview.md)
+- [Cryptographic Audit Chain Architecture](../architecture/audit-chain.md)

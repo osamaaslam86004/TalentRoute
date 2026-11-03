@@ -1,79 +1,97 @@
-# Outbox & Worker Architecture
+# Transactional Outbox & Async Worker Architecture
 
-To guarantee reliability, the system implements the **Transactional Outbox Pattern** (`app.workers.outbox`), separating HTTP transactions from background task processing.
+The **Transactional Outbox Subsystem** (`app.workers.outbox`, `app.workers.celery_app`, `app.workers.tasks`) ensures reliable, idempotent background job execution without dual-write race conditions.
 
 ---
 
-## Outbox Lifecycle & State Transitions
+## The Dual-Write Problem & Outbox Solution
 
-```mermaid
-stateDiagram-v2
-    [*] --> pending: HTTP API creates record + outbox event
-    pending --> dispatching: Claimed by outbox dispatcher (SELECT FOR UPDATE)
-    dispatching --> dispatched: Successfully enqueued to Celery broker
-    dispatching --> dead: Lease expired & attempts >= max_attempts
-    dispatching --> pending: Lease expired & attempts < max_attempts
-    dead --> pending: Manual operator requeue CLI script
-    dispatched --> [*]
+```
+[ HTTP Client Request ]
+         │
+         ▼
+[ FastAPI Endpoint ] ──► ( Single PostgreSQL Transaction )
+                            ├── 1. INSERT INTO screenings (status='queued')
+                            └── 2. INSERT INTO outbox_events (status='pending')
+                                           │
+                                           ▼ (Committed to DB)
+                                  [ Celery Beat Poller ]
+                                           │
+                                           ▼ (Enqueue Task)
+                                  [ Redis Broker ] ──► [ Celery Worker ]
 ```
 
 ---
 
-## Outbox Dispatch & Lease Mechanics
+## Outbox SQL Schema (`outbox_events`)
 
-### 1. Batch Claiming (`_claim_batch`)
-- The dispatcher executes every 5 seconds (driven by Celery Beat).
-- Fetches up to `OUTBOX_BATCH_SIZE` (default 50) records where `available_at <= NOW()` and `status IN ('pending', 'dispatching')`.
-- Uses `with_for_update(skip_locked=True)` to prevent lock contention across multiple dispatcher replicas.
-
-### 2. Lock Leases (`OUTBOX_LEASE_SECONDS`)
-- Claimed events are set to `status='dispatching'` with a timestamp `locked_at = NOW()`.
-- If a dispatcher worker crashes mid-transit, events locked longer than `OUTBOX_LEASE_SECONDS` (default 120s) are recovered on subsequent passes.
-
-### 3. Retries & Dead-Letter Queue (DLQ)
-- Each claim increments `attempt_count`.
-- If `attempt_count >= OUTBOX_MAX_ATTEMPTS` (default 12) and the lease expires, the event transitions to `status='dead'` with `last_error_code='dispatch_lease_expired'`.
-- Dead-letter events emit metric `outbox.dead`.
-
----
-
-## Celery Configuration & Idempotent Tasks
-
-```python
-celery_app.conf.update(
-    task_serializer="json",
-    task_acks_late=True,               # Acknowledge only after successful completion
-    task_reject_on_worker_lost=True,   # Requeue task if worker process dies unexpectedly
-    worker_prefetch_multiplier=1,      # Fair task distribution
-    task_time_limit=180,               # Hard timeout (180s)
-    task_soft_time_limit=150,          # Soft timeout (150s)
-)
+```sql
+CREATE TABLE outbox_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id VARCHAR(128) NOT NULL,
+    event_type VARCHAR(80) NOT NULL,
+    aggregate_id VARCHAR(128) NOT NULL,
+    payload JSONB NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending, dispatching, sent, dead
+    attempt_count INT NOT NULL DEFAULT 0,
+    available_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    locked_at TIMESTAMPTZ,
+    dispatched_at TIMESTAMPTZ,
+    last_error_code VARCHAR(80),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
 ```
 
-### Task Redelivery Handling
-The worker entrypoint `screen_candidate(screening_id)` inspects message delivery headers. If `redelivered=True`, it enables `allow_reclaim_running=True`, allowing safe execution takeover for stuck or orphaned screening records.
+---
+
+## Outbox Dispatcher Lifecycle (`dispatch_pending_outbox`)
+
+Celery Beat triggers `app.workers.outbox.dispatch_pending_outbox` every **10 seconds**:
+
+1. **Stale Lease & Dead Event Cleanup:**
+   - Outbox rows in `dispatching` state with `attempt_count >= OUTBOX_MAX_ATTEMPTS` (default 12) or expired lease (`locked_at < now - OUTBOX_LEASE_SECONDS`) are marked as `dead` with `last_error_code="dispatch_lease_expired"`.
+2. **Atomic Batch Claiming (`_claim_batch`):**
+   - Fetches up to `OUTBOX_BATCH_SIZE` (default 50) pending or stale dispatching events using `SELECT ... FOR UPDATE SKIP LOCKED`.
+   - Sets `status = "dispatching"`, `locked_at = now`, and increments `attempt_count`.
+3. **Task Enqueueing & W3C Trace Context Injection:**
+   - Injects current OpenTelemetry trace context (`traceparent`, `tracestate`) into event payload headers.
+   - Enqueues `screen_candidate` Celery task over Redis.
+   - Updates outbox record status to `sent` and sets `dispatched_at = now`.
 
 ---
 
-## Operator DLQ Requeue Tooling
+## Worker Task Processing (`screen_candidate`)
 
-Dead-letter outbox events can be safely requeued using the operational CLI tool (`app.scripts.requeue_dead_outbox`):
+Celery workers execute `app.workers.tasks.screen_candidate`:
 
-=== "Requeue Single Event"
-    ```bash
-    python -m app.scripts.requeue_dead_outbox --event-id 123e4567-e89b-12d3-a456-426614174000
-    ```
+1. **Database Record Lock:** Retrieves screening row with `FOR UPDATE`.
+2. **Reclaim Staleness Verification:** If another worker stalled, verifies `processing_started_at` exceeds `STALE_PROCESSING_SECONDS` (900s) before reclaiming.
+3. **Execution Pipeline Stages:**
+   - Stage `claim`: Updates row status to `processing`.
+   - Stage `redact`: Applies PII minimization (`app.privacy.pii_redaction.redact_pii`).
+   - Stage `graph`: Invokes compiled LangGraph assessment workflow.
+   - Stage `persist`: Stores extracted assessments, sets status to `completed`, and appends SHA-256 audit event.
+4. **Error Handling & Failure Recovery:**
+   - If processing fails, updates row status to `failed`, records `error_code = "screening_processing_failed"`, logs audit event `screening.processing_failed`, and relies on Celery task retry backoff.
 
-=== "Requeue All Dead Events (Batch)"
-    ```bash
-    python -m app.scripts.requeue_dead_outbox --all-dead --limit 100
-    ```
+---
 
-!!! note "Audit Logging"
-    Requeuing dead outbox records automatically emits an `outbox.requeued` audit event into the tenant's hash-chained audit log.
+## Dead Outbox Event Recovery Script
+
+Operators can requeue dead-letter outbox events using the administrative CLI tool:
+
+```bash
+# Requeue a single dead outbox event by UUID
+python -m app.scripts.requeue_dead_outbox --event-id "b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e"
+
+# Requeue all dead outbox events (up to limit)
+python -m app.scripts.requeue_dead_outbox --all-dead --limit 100
+```
 
 ---
 
 ## Related Documents
 - [System Architecture Overview](overview.md)
-- [Operational Runbooks](../observability/runbooks.md)
+- [LangGraph Screening Pipeline Architecture](langgraph-pipeline.md)
+- [Incident Runbooks](../observability/runbooks.md)

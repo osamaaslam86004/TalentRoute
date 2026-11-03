@@ -98,6 +98,7 @@ nav:
       - Reviewer Feedback & Appeals: api-reference/reviews.md
       - Audit Verification: api-reference/audit.md
   - Observability & Operations:
+      - Overview: observability/observability.md
       - Telemetry & RED Metrics: observability/telemetry.md
       - Incident Runbooks: observability/runbooks.md
   - Model Quality & Offline Evaluation:

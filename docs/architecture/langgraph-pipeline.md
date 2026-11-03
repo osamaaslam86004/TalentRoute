@@ -1,22 +1,20 @@
 # LangGraph Screening Pipeline Architecture
 
-The core assessment engine is built using **LangGraph** (`app.workflows.screening`), orchestrating LLM queries, structured parsing, confidence estimation, and deterministic routing.
+The core decision-support engine is built using **LangGraph** (`app.workflows.screening`), orchestrating multi-node LLM provider queries, structured output parsing, confidence estimation, and deterministic routing.
 
 ---
 
-## Workflow Graph Diagram
+## Workflow Graph Topology
 
 ```mermaid
 graph TD
-    START([Start Screening Workflow]) --> categorizer[Node: categorize_experience]
-    START --> skill_assessor[Node: assess_skillset]
-    
-    categorizer --> router{Node: route_app}
-    skill_assessor --> router
+    START([Start Workflow]) --> categorizer[Node: categorize_experience]
+    categorizer --> skill_assessor[Node: assess_skillset]
+    skill_assessor --> router{Conditional Edge: route_app}
 
-    router -->|skills_match == 'Match'| hr[hr_review Node]
-    router -->|level == 'Senior-level'| recruiter[recruiter_review Node]
-    router -->|Default / Inconclusive| manual[manual_review Node]
+    router -->|skills_match == 'Match'| hr[Node: hr_review]
+    router -->|experience_level == 'Senior-level'| recruiter[Node: recruiter_review]
+    router -->|Default / Fallback| manual[Node: manual_review]
 
     hr --> END([Workflow End])
     recruiter --> END
@@ -25,77 +23,61 @@ graph TD
 
 ---
 
-## Workflow Execution Nodes
+## State Schema (`ScreeningState`)
 
-1. **`categorize_experience` Node:**
-   - Submits redacted application text to LLM using `EXPERIENCE_SYSTEM_PROMPT`.
-   - Extracts structured `ExperienceAssessment` (Level, Confidence, Evidence, Rationale).
-2. **`assess_skillset` Node:**
-   - Submits application text alongside job title and required skill list using `SKILLS_SYSTEM_PROMPT`.
-   - Extracts structured `SkillsAssessment` (Match, Confidence, Evidence, Gaps, Rationale).
-3. **`route_app` Deterministic Router:**
-   - Inspects generated assessments to determine review routing without LLM randomness.
+The graph operates on an immutable-typed state dictionary (`app.workflows.screening.state.ScreeningState`):
 
----
-
-## Structured Output Schemas
-
-### Experience Assessment Schema (`ExperienceAssessment`)
 ```python
-class ExperienceLevel(StrEnum):
-    ENTRY_LEVEL = "Entry-level"
-    MID_LEVEL = "Mid-level"
-    SENIOR_LEVEL = "Senior-level"
-    INSUFFICIENT_EVIDENCE = "Insufficient evidence"
-
-class ExperienceAssessment(BaseModel):
-    level: ExperienceLevel
-    confidence: float = Field(ge=0.0, le=1.0) # Uncalibrated subjective model score
-    evidence: list[str] = Field(max_length=8)  # Max 500 chars per quote
-    rationale: str = Field(max_length=1200)
-```
-
-### Skills Assessment Schema (`SkillsAssessment`)
-```python
-class SkillMatch(StrEnum):
-    MATCH = "Match"
-    PARTIAL_MATCH = "Partial match"
-    NO_MATCH = "No match"
-    INSUFFICIENT_EVIDENCE = "Insufficient evidence"
-
-class SkillsAssessment(BaseModel):
-    match: SkillMatch
-    confidence: float = Field(ge=0.0, le=1.0)
-    evidence: list[str] = Field(max_length=12)
-    gaps: list[str] = Field(max_length=20)
-    rationale: str = Field(max_length=1600)
+class ScreeningState(TypedDict):
+    screening_id: str
+    application_text: str
+    job_title: str
+    required_skills: list[str]
+    experience_assessment: NotRequired[ExperienceAssessment]
+    skills_assessment: NotRequired[SkillsAssessment]
+    recommendation: NotRequired[Recommendation]
+    recommendation_reason: NotRequired[str]
+    human_review_required: NotRequired[bool]
 ```
 
 ---
 
-## Deterministic Routing Rules
+## Node & Routing Logic Execution Steps
 
-The routing logic (`route_app`) applies strict conditional rules:
+### 1. Node: `categorize_experience`
+- Calls `assessor.assess_experience(state["application_text"])` via `OpenAIAssessmentProvider`.
+- Extracts structured `ExperienceAssessment`:
+  - `level`: `ExperienceLevel` (`Entry-level`, `Mid-level`, `Senior-level`, `Insufficient evidence`)
+  - `confidence`: float between `0.0` and `1.0`
+  - `evidence`: list of up to 8 verbatim candidate resume quote strings supporting the classification.
 
-| Condition | Assigned Route (`Recommendation`) | Human Review Required | Rationale |
-| :--- | :--- | :--- | :--- |
-| `skills_assessment.match == SkillMatch.MATCH` | `hr_review` | `True` | Skills evidence directly supports job requirements; priority HR review. |
-| `experience_assessment.level == ExperienceLevel.SENIOR_LEVEL` | `recruiter_review` | `True` | Experience level is senior, but required skills match is partial/incomplete. |
-| *Default Fallback* | `manual_review` | `True` | Evidence is ambiguous or insufficient; requires manual recruiter review. |
+### 2. Node: `assess_skillset`
+- Calls `assessor.assess_skills(state["application_text"], state["job_title"], state["required_skills"])`.
+- Extracts structured `SkillsAssessment`:
+  - `match`: `SkillMatch` (`Match`, `Partial match`, `No match`, `Insufficient evidence`)
+  - `confidence`: float between `0.0` and `1.0`
+  - `evidence`: list of up to 12 verbatim text quote strings.
+  - `gaps`: list of required skills missing or unverified in candidate text.
 
-!!! warning "Human-in-the-Loop Safeguard"
-    All automated routes set `human_review_required = True`. The pipeline serves purely as a decision-support aid and **never** makes autonomous hiring or rejection decisions.
+### 3. Conditional Edge: `route_app`
+Deterministic routing logic assigns candidate submissions to advisory review queues:
+
+1. **HR Review Queue (`hr_review`):** Selected when `skills_assessment.match == SkillMatch.MATCH`. Sets `recommendation = Recommendation.HR_REVIEW` and `recommendation_reason = "Skills evidence supports prioritizing a human HR review; no hiring decision has been made."`.
+2. **Recruiter Review Queue (`recruiter_review`):** Selected when `experience_level == ExperienceLevel.SENIOR` (and skills match is incomplete). Sets `recommendation = Recommendation.RECRUITER_REVIEW` and `recommendation_reason = "Experience appears senior while required-skill evidence is incomplete or not matched; recruiter review is suggested."`.
+3. **Manual Review Queue (`manual_review`):** Default fallback when evidence is inconclusive or mismatched. Sets `recommendation = Recommendation.MANUAL_REVIEW` and `recommendation_reason = "Evidence is insufficient or does not clearly support the other review routes; qualified human review is required."`.
+
+*Note: All review routes strictly set `human_review_required = True`.*
 
 ---
 
-## Prompt Versioning & Injection Defenses
+## Provider Abstraction & Telemetry Callbacks
 
-- **Prompt Versioning Constant:** `PROMPT_VERSION = "screening-prompts-v1.1.0"` (persisted per screening record for drift auditing).
-- **Injection Protection:** System prompts explicitly treat candidate input as untrusted data, instructing the model to ignore embedded commands asking to change roles, reveal prompts, or bypass evaluation rubrics.
-- **Fairness Protection:** Prompts explicitly forbid inferring capability from protected characteristics or proxies.
+- **Provider Dependency Injection:** Graph compilation accepts `provider: AssessmentProvider | None`. In unit/offline tests, fake providers can be injected without external API calls.
+- **OpenTelemetry LLM Callback Handler (`TelemetryCallbackHandler`):** Attached during production graph execution (`ainvoke`). Records LLM completion token counts, prompt token counts, call latencies, and model versions without exporting applicant resume text to traces.
 
 ---
 
 ## Related Documents
-- [PII Redaction Engine](pii-redaction.md)
+- [System Architecture Overview](overview.md)
+- [PII Redaction Engine Reference](pii-redaction.md)
 - [Offline Evaluation Framework](../evaluation/offline-evaluation.md)

@@ -1,93 +1,133 @@
-# Append-Only Audit Chain Architecture
+# Cryptographic Audit Chain Architecture
 
-To fulfill compliance, privacy, and legal auditability standards, the service maintains a **tenant-isolated, tamper-evident SHA-256 hash-chained audit log** (`app.audit`).
+The **Audit Subsystem** (`app.audit.service` and `app.audit.integrity`) maintains a per-tenant, tamper-evident SHA-256 cryptographic hash chain for regulatory compliance, non-repudiation, and audit verification.
 
 ---
 
-## Cryptographic Hash-Chain Mechanics
-
-Each audit event record is linked cryptographically to its predecessor:
+## Cryptographic Hash Chain Structure
 
 ```
-Genesis Event (sequence_no=1)
-├── previous_hash: 0000000000000000000000000000000000000000000000000000000000000000 (GENESIS_HASH)
-└── event_hash: SHA256(Canonical JSON Payload 1)
-        │
-        ▼
-Audit Event 2 (sequence_no=2)
-├── previous_hash: event_hash of Event 1
-└── event_hash: SHA256(Canonical JSON Payload 2)
-        │
-        ▼
-Audit Event 3 (sequence_no=3)
-├── previous_hash: event_hash of Event 2
-└── event_hash: SHA256(Canonical JSON Payload 3)
+Genesis Event (sequence_no = 1, previous_hash = "0000...0000")
+       │
+       ▼  [SHA-256 canonical payload hash]
+Event #1 (event_hash = "a1f8...")
+       │
+       ▼  (previous_hash = "a1f8...")
+Event #2 (event_hash = "b2c9...")
+       │
+       ▼  (previous_hash = "b2c9...")
+Event #3 (event_hash = "c3d0...") ──► Head Sequence locked in audit_chain_head table
 ```
 
 ---
 
-## Canonical Payload Hashing (`calculate_event_hash`)
-
-The event hash is computed by canonicalizing the payload dictionary into deterministic UTF-8 JSON bytes before taking the SHA-256 digest:
-
-```python
-canonical = json.dumps(
-    payload,
-    ensure_ascii=False,
-    sort_keys=True,
-    separators=(",", ":"),
-    allow_nan=False,
-).encode("utf-8")
-event_hash = hashlib.sha256(canonical).hexdigest()
-```
-
----
-
-## Concurrency Control & Row Locking (`AuditChainHead`)
-
-To guarantee strict sequential ordering (`sequence_no`) without cryptographic forks during high concurrent traffic, audit creation locks the tenant's chain head row:
+## SQL Schema Definition (`audit_events` & `audit_chain_head`)
 
 ```sql
--- Step 1: Ensure chain head exists
-INSERT INTO audit_chain_heads (tenant_id, last_sequence, last_hash, updated_at)
-VALUES (:tenant_id, 0, :genesis_hash, CURRENT_TIMESTAMP)
-ON CONFLICT (tenant_id) DO NOTHING;
+CREATE TABLE audit_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id VARCHAR(128) NOT NULL,
+    sequence_no BIGINT NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    actor_subject VARCHAR(128) NOT NULL,
+    actor_roles JSONB NOT NULL DEFAULT '[]'::jsonb,
+    request_id VARCHAR(128),
+    action VARCHAR(120) NOT NULL,
+    resource_type VARCHAR(80) NOT NULL,
+    resource_id VARCHAR(128),
+    outcome VARCHAR(20) NOT NULL DEFAULT 'success',
+    previous_hash VARCHAR(64) NOT NULL,
+    event_hash VARCHAR(64) NOT NULL,
+    event_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
 
--- Step 2: Lock chain head for tenant
-SELECT * FROM audit_chain_heads 
-WHERE tenant_id = :tenant_id 
-FOR UPDATE;
+CREATE TABLE audit_chain_head (
+    tenant_id VARCHAR(128) PRIMARY KEY,
+    last_sequence BIGINT NOT NULL,
+    last_hash VARCHAR(64) NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
 ```
 
 ---
 
-## Metadata Projection Allow-list
+## Canonical JSON & Hash Calculation Algorithm
 
-To prevent sensitive PII, prompts, or arbitrary data from polluting the audit chain, metadata dictionary keys are strictly validated against `_ALLOWED_METADATA`:
+To ensure byte-for-byte reproducibility across database platforms and languages, audit event payloads are formatted using deterministic canonical JSON (`app.audit.integrity.calculate_event_hash`):
 
-```python
-_ALLOWED_METADATA = {
-    "status", "count", "limit", "offset", "prompt_version", 
-    "model_version", "rubric_version", "label", "reason_codes", 
-    "redacted_categories", "latency_ms", "cost_usd", "dataset_version", 
-    "report_id", "appeal_outcome", "attempt_count", "record_type", "schema_valid"
-}
-```
-
-- **Value Limits:** String values are capped at 160 characters; list items capped at 20 elements of 80 characters. Unallowed keys are discarded automatically.
+1. **Canonical Schema Assembly (`audit_hash_payload`):**
+   ```python
+   {
+       "id": str(event_id),
+       "occurred_at": occurred_at.astimezone(UTC).isoformat(timespec="microseconds"),
+       "tenant_id": tenant_id,
+       "actor_subject": actor_subject,
+       "actor_roles": sorted(actor_roles),
+       "request_id": request_id,
+       "action": action,
+       "resource_type": resource_type,
+       "resource_id": resource_id,
+       "outcome": outcome,
+       "metadata": metadata,
+       "sequence_no": sequence_no,
+       "previous_hash": previous_hash,
+   }
+   ```
+2. **Canonical Serialization & Digesting:**
+   - JSON encoded with `ensure_ascii=False`, `sort_keys=True`, `separators=(",", ":")`, `allow_nan=False`.
+   - `event_hash = hashlib.sha256(canonical_bytes).hexdigest()`.
 
 ---
 
-## Cryptographic Chain Verification
+## Per-Tenant Serialization & Row Locking
 
-The chain integrity verification endpoint (`GET /api/v1/audit-events/integrity`) scans all events sequentially for the authenticated tenant:
+When appending new audit events (`record_audit_event`), the database obtains an exclusive row lock on `audit_chain_head` using `SELECT ... FOR UPDATE`:
+- Prevents race conditions and sequence gap anomalies during high-concurrency requests.
+- First event for a tenant sets `previous_hash = "0" * 64` (Genesis Hash) and `sequence_no = 1`.
+- Subsequent events set `previous_hash = head.last_hash` and `sequence_no = head.last_sequence + 1`.
 
-1. Re-calculates expected SHA-256 hash for every historical event payload.
-2. Asserts that `event.previous_hash` matches the prior event's `event_hash`.
-3. Returns `valid: true` if unbroken, or details the sequence number of any detected tampering.
+---
+
+## Chain Integrity Verification (`verify_audit_chain`)
+
+The verification engine (`GET /api/v1/audit-events/integrity`) scans the tenant's complete event chain sequentially:
+
+1. Asserts `sequence_no` starts at 1 and increases monotonically without gaps.
+2. Asserts `event.previous_hash` matches the prior event's `event_hash`.
+3. Re-calculates `calculate_event_hash(payload)` and compares with stored `event.event_hash`.
+4. Asserts that the final event matches `AuditChainHead.last_sequence` and `AuditChainHead.last_hash`.
+
+### Verification Failure Reasons
+- `sequence_gap_or_reordering`: Sequence numbers are missing or out of order.
+- `previous_hash_mismatch`: `previous_hash` pointer does not equal the preceding event's hash.
+- `event_hash_mismatch`: Re-calculated payload SHA-256 digest differs from stored `event_hash`.
+- `chain_head_mismatch`: `AuditChainHead` row differs from the last chain event.
+- `chain_head_missing`: Audit events exist but no `AuditChainHead` row exists.
+
+---
+
+## Audit Event Action Catalog
+
+| Action Name | Resource Type | Trigger Condition |
+| :--- | :--- | :--- |
+| `screening.created` | `screening` | Candidate screening submission accepted |
+| `screening.idempotency_replayed` | `screening` | Duplicate submission deduplicated via Idempotency-Key |
+| `screening.read` | `screening` | Single screening detail fetched by authorized principal |
+| `screening.listed` | `screening_collection` | Screenings list fetched by authorized principal |
+| `screening.deleted` | `screening` | Candidate screening record deleted (GDPR erasure) |
+| `screening.processing_completed` | `screening` | Worker finished processing screening successfully |
+| `screening.processing_failed` | `screening` | Worker encountered unrecoverable processing error |
+| `review.feedback_submitted` | `reviewer_feedback` | Human reviewer submitted evaluation feedback |
+| `review.feedback_listed` | `screening` | Human feedback history listed for a screening |
+| `review.appeal_recorded` | `reviewer_feedback` | Compliance officer recorded an appeal determination |
+| `audit.events_read` | `audit_event_collection` | Audit log entries queried |
+| `audit.integrity_checked` | `audit_chain` | Cryptographic audit chain verification executed |
+| `outbox.requeued` | `outbox_event` | Operator requeued dead-letter outbox event via CLI |
 
 ---
 
 ## Related Documents
-- [Audit API Reference](../api-reference/audit.md)
-- [Operational Runbooks](../observability/runbooks.md)
+- [Audit API Endpoint Reference](../api-reference/audit.md)
+- [System Architecture Overview](overview.md)
+- [Incident Runbooks](../observability/runbooks.md)

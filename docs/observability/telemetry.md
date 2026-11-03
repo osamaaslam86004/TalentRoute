@@ -1,71 +1,59 @@
-# Telemetry & Observability Reference
+# OpenTelemetry Metrics & Tracing Reference
 
-The service features vendor-neutral OpenTelemetry instrumentation (`app.observability`), Prometheus RED metrics, trace context propagation, and strict privacy guardrails (`policy.py`).
-
----
-
-## RED Metrics Reference
-
-| Metric Name | Type | Unit | Description & Allowed Metric Labels |
-| :--- | :--- | :--- | :--- |
-| `http_requests_total` | Counter | Requests | Total HTTP requests handled. Labels: `route`, `method`, `status_class`. |
-| `http_request_duration_seconds` | Histogram | Seconds | Endpoint execution latency. Labels: `route`, `method`, `status_class`. |
-| `screening_pipeline_events_total` | Counter | Events | Workflow pipeline state transitions. Labels: `stage`, `outcome`, `status`. |
-| `screening_pipeline_duration_seconds` | Histogram | Seconds | Total time to complete LangGraph processing. Labels: `stage`, `status`. |
-| `auth_failures_total` | Counter | Failures | Authentication rejection counts. Labels: `reason` (`missing`, `invalid`, `forbidden`). |
-| `outbox_dispatch_lag_seconds` | Histogram | Seconds | Delay from outbox creation to worker dispatch. |
-| `pii_redactions_total` | Counter | Maskings | PII replacements made. Labels: `redaction_category`. |
+This reference details the low-cardinality OpenTelemetry metrics catalog, distributed tracing spans, and privacy policy safeguards (`app.observability.metrics` and `app.observability.tracing`).
 
 ---
 
-## Telemetry Privacy & Cardinality Safeguards (`policy.py`)
+## Prometheus RED & Pipeline Metric Catalog
 
-To protect candidate PII and prevent metric cardinality explosions, all metric labels and span attributes pass through a strict allow-list policy filter.
-
-### Allowed Metric Labels (`ALLOWED_METRIC_LABELS`)
-`route`, `method`, `status_class`, `event_type`, `outcome`, `stage`, `model`, `operation`, `error_type`, `redaction_category`, `reason`, `decision`, `status`, `queue`.
-
-### Forbidden Metric Labels (`FORBIDDEN_METRIC_LABELS`)
-`tenant_id`, `actor`, `actor_hash`, `subject`, `screening_id`, `request_id`, `task_id`, `job_title`, `required_skills`, `path`, `url`, `application_text`.
-
-!!! security "Zero-PII Telemetry Guarantee"
-    Application text, prompt strings, candidate names, and tenant identifiers are **strictly prohibited** from metric labels. Actor subjects are anonymized using HMAC-SHA256 salt hashing (`actor_hash`).
-
----
-
-## Structured JSON Logging vs. Console Logging
-
-Configured via `LOG_FORMAT`:
-
-=== "Console Format (`LOG_FORMAT=console`)"
-    ```text
-    2026-11-01 04:50:00 [INFO] app.workers.tasks: Processed screening_id=7f3c2b1a... status=processed
-    ```
-
-=== "JSON Format (`LOG_FORMAT=json`)"
-    ```json
-    {
-      "timestamp": "2026-11-01T04:50:00.123456Z",
-      "level": "INFO",
-      "logger": "app.workers.tasks",
-      "service": "candidate-screening",
-      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
-      "span_id": "00f067aa0ba902b7",
-      "tenant_id": "tenant-corp-alpha",
-      "message": "Processed screening record successfully",
-      "screening_id": "7f3c2b1a-8e9d-4c5b-a1b2-c3d4e5f6a7b8"
-    }
-    ```
+| Metric Identifier | Instrument Type | Unit | Key Labels | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `app_http_server_request_count_total` | Counter | Requests | `route`, `method`, `status_code` | HTTP request volume across API routes. Status codes grouped into low-cardinality strings. |
+| `app_http_server_request_duration_seconds` | Histogram | Seconds | `route`, `method`, `status_code` | HTTP request latency histogram distribution. |
+| `app_auth_failures_total` | Counter | Failures | `reason` (`missing`, `invalid`, `forbidden`, `jwks_unavailable`) | Total authentication and authorization failure occurrences. |
+| `app_rate_limit_decisions_total` | Counter | Decisions | `decision` (`allowed`, `limited`, `backend_error_closed`, `backend_error_open`) | Rate limiter decision outcomes. |
+| `app_pipeline_events_total` | Counter | Events | `event_type`, `outcome`, `stage`, `status` | Screening pipeline state transition counter. |
+| `app_screening_processing_duration_seconds` | Histogram | Seconds | None | Worker execution duration for processing a single screening. |
+| `app_screening_end_to_end_duration_seconds` | Histogram | Seconds | None | Total elapsed time from initial HTTP submission (`POST`) to worker completion. |
+| `app_outbox_pending` | Gauge | Count | None | Number of pending outbox events awaiting dispatch. |
+| `app_outbox_dead` | Gauge | Count | None | Number of dead-letter outbox events requiring operator intervention. |
+| `app_outbox_dispatch_lag_seconds` | Histogram | Seconds | None | Time lag between outbox event creation and successful dispatch. |
+| `app_redis_queue_length` | Gauge | Count | None | Number of enqueued tasks in the Redis task queue. |
+| `app_audit_chain_valid` | Gauge | Boolean | None | Audit hash chain status (`1` = valid, `0` = broken/tampered). |
+| `app_audit_head_lock_duration_seconds` | Histogram | Seconds | `outcome` (`success`, `failure`) | Time spent acquiring tenant row lock on `audit_chain_head`. |
+| `app_db_pool_in_use` | Gauge | Connections | None | Active PostgreSQL database connection count. |
+| `app_db_pool_available` | Gauge | Connections | None | Idle/available PostgreSQL database connection count. |
 
 ---
 
-## Distributed Tracing & W3C `traceparent`
+## Distributed Tracing & Execution Stages
 
-- Trace contexts are propagated automatically across HTTP headers, outbox records, and Celery task execution using standard W3C `traceparent` headers.
-- Allows end-to-end tracing from HTTP submission through outbox dispatch to background LLM worker completion in Jaeger/Grafana Tempo.
+The service propagates W3C Trace Context headers (`traceparent`, `tracestate`) across asynchronous boundaries:
+
+```
+[ HTTP POST /screenings ] (Span: HTTP POST /api/v1/screenings)
+          │
+          ▼ (Store Outbox Row with Trace Context)
+[ Outbox Dispatcher ] (Span: outbox.dispatch)
+          │
+          ▼ (Celery Message Header Propagation)
+[ Celery Worker ] (Span: celery.process_screening)
+          ├── Stage "claim": DB Row Lock & Processing State
+          ├── Stage "redact": Pre-Provider PII Minimization
+          ├── Stage "graph": LangGraph Execution (Nodes: categorize_experience, assess_skillset)
+          └── Stage "persist": Result Storage & Audit Chain Append
+```
+
+---
+
+## Privacy & Telemetry Guard Policies
+
+1. **Zero-PII Metric Labels:** Metric labels use strictly enumerated, low-cardinality strings. Candidate text, names, emails, and raw subjects are **never** placed in metric labels or span attributes.
+2. **Actor Anonymization (`actor_hash`):** Raw user subjects are hashed with `TELEMETRY_HASH_SALT` into a 16-character hex digest before being attached to span context.
+3. **LangSmith Guard Policy (`enforce_langsmith_policy`):** In `staging` or `production`, startup **fails immediately** if LangSmith prompt-tracing environment variables are detected when `ALLOW_LANGSMITH_TRACING=False`.
 
 ---
 
 ## Related Documents
-- [Configuration Reference](../getting-started/configuration.md)
-- [Operational Runbooks](runbooks.md)
+- [Observability Guide](observability.md)
+- [Operational Incident Runbooks](runbooks.md)
