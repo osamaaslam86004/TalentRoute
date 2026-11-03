@@ -24,11 +24,17 @@ def _invoke_process_screening(
     try:
         asyncio.get_running_loop()
     except RuntimeError:
+<<<<<<< Updated upstream
         asyncio.run(coroutine)
         return
 
     result: dict[str, Any] = {}
     error: dict[str, BaseException] = {}
+=======
+        loop = None
+    if loop and loop.is_running():
+        import concurrent.futures
+>>>>>>> Stashed changes
 
     def _run_in_thread() -> None:
         try:
@@ -54,10 +60,28 @@ def _invoke_process_screening(
 )
 def _screen_candidate_task(self, screening_id: str) -> dict[str, str]:
     """Process one persisted screening record. Retries are bounded in Celery configuration."""
+<<<<<<< Updated upstream
     request = getattr(self, "request", None)
     delivery_info = getattr(request, "delivery_info", {}) or {}
     allow_reclaim_running = bool(delivery_info.get("redelivered"))
 
+=======
+    if len(args) >= 2:
+        task_obj = args[0]
+        screening_id = str(args[1])
+    elif len(args) == 1:
+        task_obj = self
+        screening_id = str(args[0])
+    elif "screening_id" in kwargs:
+        task_obj = self
+        screening_id = str(kwargs["screening_id"])
+    else:
+        raise ValueError("screening_id is required")
+    request_obj = getattr(task_obj, "request", None) or getattr(self, "request", None)
+    delivery_info = getattr(request_obj, "delivery_info", None) or {}
+    allow_reclaim_running = bool(delivery_info.get("redelivered"))
+    retries = getattr(request_obj, "retries", 0)
+>>>>>>> Stashed changes
     try:
         _invoke_process_screening(
             screening_id,

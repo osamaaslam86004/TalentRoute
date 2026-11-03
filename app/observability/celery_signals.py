@@ -53,10 +53,8 @@ _active: dict[
 def _get_headers(task: Any) -> dict[str, str]:
     request = getattr(task, "request", None)
     raw = getattr(request, "headers", None) or {}
-
     if not isinstance(raw, dict):
         return {}
-
     return {
         key: value
         for key, value in raw.items()
@@ -67,7 +65,6 @@ def _get_headers(task: Any) -> dict[str, str]:
 def _parse_timestamp(value: str | None) -> datetime | None:
     if not value or len(value) > 64:
         return None
-
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         return parsed if parsed.tzinfo is not None else None
@@ -78,7 +75,6 @@ def _parse_timestamp(value: str | None) -> datetime | None:
 def _setup_process(role: str) -> None:
     settings = get_settings()
     setup_observability(role, settings)
-
     if settings.otel_enabled:
         initialize_tracing(settings)
         initialize_metrics(settings)
@@ -139,23 +135,17 @@ def start_task_telemetry(
     kwargs: dict | None = None,
     **_: Any,
 ) -> None:
-
     if sender is None:
         return
-
     request_id = str(
         task_id or getattr(getattr(sender, "request", None), "id", "unknown")
     )[:128]
-
     headers = _get_headers(sender)
     screening_id = None
-
     if getattr(sender, "name", "") == "app.workers.tasks.screen_candidate":
         candidate = (args or (None,))[0] if args else (kwargs or {}).get("screening_id")
-
         if isinstance(candidate, str) and len(candidate) <= 128:
             screening_id = candidate
-
     started_at = time.perf_counter()
     enqueued_at = _parse_timestamp(headers.get("enqueued_at"))
     scope_manager = context_scope(
@@ -164,12 +154,10 @@ def start_task_telemetry(
         screening_id=screening_id,
         task_id=request_id,
     )
-
     scope_manager.__enter__()
     parent_context = extract_trace_context(
         {"traceparent": headers.get("traceparent", "")}
     )
-
     tracer = trace.get_tracer("app.workers.celery")
     span_manager = tracer.start_as_current_span(
         "celery.task",
@@ -186,7 +174,6 @@ def start_task_telemetry(
             ),
         },
     )
-
     span_manager.__enter__()
     with _lock:
         _active[request_id] = (
@@ -196,7 +183,6 @@ def start_task_telemetry(
             enqueued_at,
             str(getattr(sender, "name", "unknown")),
         )
-
     if enqueued_at is not None:
         record_queue_wait(max(0.0, (datetime.now(UTC) - enqueued_at).total_seconds()))
     record_pipeline_event("celery.task.started", outcome="success", stage="celery")
@@ -204,15 +190,12 @@ def start_task_telemetry(
 
 @task_retry.connect(weak=False)
 def record_task_retry(sender: Any = None, request: Any = None, **_: Any) -> None:
-
     task_id = str(
         getattr(request, "id", None)
         or getattr(getattr(sender, "request", None), "id", "unknown")
     )[:128]
-
     with _lock:
         entry = _active.get(task_id)
-
     if entry is not None:
         trace.get_current_span().set_attribute("app.outcome", "retry")
     record_pipeline_event("celery.task.retry", outcome="retry", stage="celery")
@@ -225,12 +208,9 @@ def record_task_failure(
     exception: BaseException | None = None,
     **_: Any,
 ) -> None:
-
     safe_type = type(exception).__name__[:64] if exception is not None else "unknown"
-
     with _lock:
         entry = _active.get(str(task_id or "")[:128])
-
     if entry is not None:
         try:
             span = trace.get_current_span()
@@ -238,7 +218,6 @@ def record_task_failure(
             span.set_attribute("error.type", safe_type)
         except Exception:
             pass
-
     record_pipeline_event(
         "celery.task.failed",
         outcome="failure",
@@ -251,12 +230,9 @@ def record_task_failure(
 def finish_task_telemetry(
     task_id: str | None = None, state: str | None = None, **_: Any
 ) -> None:
-
     key = str(task_id or "unknown")[:128]
-
     with _lock:
         entry = _active.pop(key, None)
-
     if entry is None:
         return
     scope_manager, span_manager, started_at, enqueued_at, task_name = entry
@@ -264,7 +240,6 @@ def finish_task_telemetry(
     normalized = {"SUCCESS": "success", "FAILURE": "failure", "RETRY": "retry"}.get(
         str(state).upper(), "unknown"
     )
-
     try:
         span = trace.get_current_span()
         span.set_attribute("app.outcome", normalized)

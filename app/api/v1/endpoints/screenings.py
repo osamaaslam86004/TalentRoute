@@ -50,20 +50,16 @@ async def create_screening(
     principal: Principal = Depends(require_permission("screening:write")),
     session: AsyncSession = Depends(get_db_session),
 ) -> ScreeningAccepted:
-
     if len(payload.application_text) > get_settings().max_application_chars:
         raise HTTPException(
             status_code=413, detail="Application text exceeds configured limit"
         )
-
     await enforce_screening_rate_limit(request, principal)
-
     request_fingerprint = hashlib.sha256(
         json.dumps(
             payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
     ).hexdigest()
-
     # An idempotency key is scoped to the authenticated tenant. Reusing it for
     # a different request is a conflict rather than a silently different job.
     if idempotency_key:
@@ -73,14 +69,12 @@ async def create_screening(
                 Screening.idempotency_key == idempotency_key,
             )
         )
-
         if existing is not None:
             if existing.request_fingerprint != request_fingerprint:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Idempotency-Key has already been used with a different request",
                 )
-
             await record_audit_event(
                 session,
                 principal=principal,
@@ -91,9 +85,7 @@ async def create_screening(
                 resource_id=str(existing.id),
                 metadata={"status": existing.status},
             )
-
             await session.commit()
-
             return ScreeningAccepted(
                 id=existing.id,
                 status=existing.status,
@@ -101,7 +93,6 @@ async def create_screening(
                     request.url_for("get_screening", screening_id=existing.id)
                 ),
             )
-
     row = Screening(
         tenant_id=principal.tenant_id,
         request_id=getattr(request.state, "request_id", None),
@@ -113,11 +104,9 @@ async def create_screening(
         required_skills=payload.required_skills,
         human_review_required=True,
     )
-
     try:
         session.add(row)
         await session.flush()
-
         # The outbox row and business record commit together. A separate dispatcher
         # will deliver the event to Celery, avoiding a commit/queue dual-write gap.
         session.add(
@@ -134,7 +123,6 @@ async def create_screening(
                 status="pending",
             )
         )
-
         await record_audit_event(
             session,
             principal=principal,
@@ -149,12 +137,9 @@ async def create_screening(
                 "idempotency_enabled": bool(idempotency_key),
             },
         )
-
         await session.commit()
-
     except IntegrityError as exc:
         await session.rollback()
-
         # Two same-key requests can race through the initial lookup. The unique
         # index elects one winner; return it if the normalized payload matches.
         if idempotency_key:
@@ -164,7 +149,6 @@ async def create_screening(
                     Screening.idempotency_key == idempotency_key,
                 )
             )
-
             if (
                 existing is not None
                 and existing.request_fingerprint == request_fingerprint
@@ -182,9 +166,7 @@ async def create_screening(
                     detail="Idempotency-Key has already been used with a different request",
                 ) from exc
         raise
-
     await session.refresh(row)
-
     return ScreeningAccepted(
         id=row.id,
         status=row.status,
@@ -200,11 +182,9 @@ async def get_screenings(
     principal: Principal = Depends(require_permission("screening:read")),
     session: AsyncSession = Depends(get_db_session),
 ) -> ScreeningList:
-
     rows, count = await list_screenings(
         session, tenant_id=principal.tenant_id, limit=limit, offset=offset
     )
-
     await record_audit_event(
         session,
         principal=principal,
@@ -214,9 +194,7 @@ async def get_screenings(
         resource_type="screening_collection",
         metadata={"limit": limit, "offset": offset, "count": count},
     )
-
     await session.commit()
-
     return ScreeningList(
         items=[ScreeningRead.model_validate(row) for row in rows],
         limit=limit,
@@ -232,14 +210,11 @@ async def get_screening_endpoint(
     principal: Principal = Depends(require_permission("screening:read")),
     session: AsyncSession = Depends(get_db_session),
 ) -> ScreeningRead:
-
     row = await get_screening(session, screening_id, tenant_id=principal.tenant_id)
-
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Screening not found"
         )
-
     await record_audit_event(
         session,
         principal=principal,
@@ -254,9 +229,7 @@ async def get_screening_endpoint(
             "prompt_version": row.prompt_version,
         },
     )
-
     await session.commit()
-
     return ScreeningRead.model_validate(row)
 
 
@@ -270,12 +243,10 @@ async def delete_screening(
     row = await get_screening(
         session, screening_id, tenant_id=principal.tenant_id, for_update=True
     )
-
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Screening not found"
         )
-
     await record_audit_event(
         session,
         principal=principal,
@@ -286,8 +257,6 @@ async def delete_screening(
         resource_id=str(row.id),
         metadata={"status": row.status},
     )
-
     await session.delete(row)
     await session.commit()
-
     return Response(status_code=status.HTTP_204_NO_CONTENT)

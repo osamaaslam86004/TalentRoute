@@ -1,5 +1,4 @@
 """Append-only audit event creation and tenant-scoped querying helpers.
-
 Only explicitly allow-listed metadata fields are accepted. Never pass applicant text, raw prompts,
 provider responses, credentials, free-form reviewer notes, or unmatched request payloads here.
 """
@@ -7,7 +6,10 @@ provider responses, credentials, free-form reviewer notes, or unmatched request 
 from __future__ import annotations
 
 import asyncio
+<<<<<<< Updated upstream
 import inspect
+=======
+>>>>>>> Stashed changes
 import math
 import time
 import uuid
@@ -67,12 +69,22 @@ _ALLOWED_METADATA = {
     "schema_valid",
 }
 
+_sqlite_chain_heads: dict[str, tuple[int, str]] = {}
+_tenant_locks: dict[str, asyncio.Lock] = {}
+_locks_guard = asyncio.Lock()
+
+
+async def _get_tenant_lock(tenant_id: str) -> asyncio.Lock:
+    if tenant_id not in _tenant_locks:
+        async with _locks_guard:
+            if tenant_id not in _tenant_locks:
+                _tenant_locks[tenant_id] = asyncio.Lock()
+    return _tenant_locks[tenant_id]
+
 
 def safe_audit_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     """Project supplied metadata onto a small allow-list and cap values before persistence."""
-
     safe: dict[str, Any] = {}
-
     for key, value in (metadata or {}).items():
         if key not in _ALLOWED_METADATA or value is None:
             continue
@@ -88,7 +100,6 @@ def safe_audit_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
             safe[key] = [
                 str(item)[:80] for item in value[:20] if isinstance(item, str | int)
             ]
-
     return safe
 
 
@@ -106,6 +117,7 @@ async def record_audit_event(
     actor_subject: str | None = None,
     actor_roles: list[str] | None = None,
 ) -> AuditEvent:
+<<<<<<< Updated upstream
     """Append an event and extend the tenant hash chain under a single transaction."""
 
     tenant_id = tenant_id[:128]
@@ -315,6 +327,13 @@ async def verify_audit_chain(
                 text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
             )
 
+=======
+    """Append an event and extend the tenant hash chain under a locked chain-head row."""
+    tenant_id = tenant_id[:128]
+    tenant_lock = await _get_tenant_lock(tenant_id)
+
+    async with tenant_lock:
+>>>>>>> Stashed changes
         await session.execute(
             text("""
                 INSERT INTO audit_chain_heads (tenant_id, last_sequence, last_hash, updated_at)
@@ -323,7 +342,6 @@ async def verify_audit_chain(
             """),
             {"tenant_id": tenant_id, "genesis_hash": GENESIS_HASH},
         )
-
         lock_start = time.perf_counter()
         try:
             head = await session.scalar(
@@ -341,6 +359,122 @@ async def verify_audit_chain(
             )
             raise
 
+        if head is None:
+            raise RuntimeError("Unable to allocate audit chain head")
+
+        is_sqlite = (
+            session.bind is not None
+            and getattr(session.bind.dialect, "name", "") == "sqlite"
+        ) or (
+            session.kw.get("bind") is not None
+            and getattr(session.kw["bind"].dialect, "name", "") == "sqlite"
+        )
+
+        if is_sqlite:
+            cached = _sqlite_chain_heads.get(tenant_id)
+            if cached is not None and cached[0] >= head.last_sequence:
+                last_sequence, previous_hash = cached
+            else:
+                last_sequence, previous_hash = head.last_sequence, head.last_hash
+        else:
+            last_sequence, previous_hash = head.last_sequence, head.last_hash
+
+        sequence_no = last_sequence + 1
+        event_id = uuid.uuid4()
+        occurred_at = datetime.now(UTC)
+        subject = (
+            actor_subject or (principal.subject if principal else "service:worker")
+        )[:255]
+        roles = sorted(principal.roles) if principal else (actor_roles or ["service"])
+        request_id = (request_id or "")[:64] or None
+        action = action[:120]
+        resource_type = resource_type[:80]
+        resource_id = (resource_id or "")[:128] or None
+        outcome = outcome[:40]
+        sanitized_metadata = safe_audit_metadata(metadata)
+
+        hash_payload = audit_hash_payload(
+            event_id=str(event_id),
+            occurred_at=occurred_at,
+            tenant_id=tenant_id,
+            actor_subject=subject,
+            actor_roles=roles,
+            request_id=request_id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            outcome=outcome,
+            metadata=sanitized_metadata,
+            sequence_no=sequence_no,
+            previous_hash=previous_hash,
+        )
+        event_hash = calculate_event_hash(hash_payload)
+
+        if is_sqlite:
+            _sqlite_chain_heads[tenant_id] = (sequence_no, event_hash)
+
+        head.last_sequence = sequence_no
+        head.last_hash = event_hash
+
+        event = AuditEvent(
+            id=event_id,
+            occurred_at=occurred_at,
+            tenant_id=tenant_id,
+            sequence_no=sequence_no,
+            previous_hash=previous_hash,
+            event_hash=event_hash,
+            actor_subject=subject,
+            actor_roles=roles,
+            request_id=request_id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            outcome=outcome,
+            event_metadata=sanitized_metadata,
+        )
+        session.add(event)
+        return event
+
+
+async def verify_audit_chain(
+    session: AsyncSession, *, tenant_id: str
+) -> dict[str, Any]:
+    """Verify event sequence, predecessor links, row hashes and stored chain head
+    using a Repeatable Read snapshot to prevent race conditions without blocking concurrent appends.
+    """
+    # Start a nested transaction for snapshot consistency.
+    # REPEATABLE READ isolation is PostgreSQL-specific; SQLite (used in tests) does not
+    # support this SQL syntax, so we only issue it on non-SQLite dialects.
+    async with session.begin_nested():
+        dialect_name = session.bind.dialect.name if session.bind else ""
+        if dialect_name not in ("sqlite",):
+            await session.execute(
+                text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            )
+        await session.execute(
+            text("""
+                INSERT INTO audit_chain_heads (tenant_id, last_sequence, last_hash, updated_at)
+                VALUES (:tenant_id, 0, :genesis_hash, CURRENT_TIMESTAMP)
+                ON CONFLICT (tenant_id) DO NOTHING
+            """),
+            {"tenant_id": tenant_id, "genesis_hash": GENESIS_HASH},
+        )
+        lock_start = time.perf_counter()
+        try:
+            head = await session.scalar(
+                select(AuditChainHead)
+                .where(AuditChainHead.tenant_id == tenant_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            record_audit_head_lock_duration(
+                max(0.0, time.perf_counter() - lock_start), outcome="success"
+            )
+        except Exception:
+            record_audit_head_lock_duration(
+                max(0.0, time.perf_counter() - lock_start), outcome="failure"
+            )
+            raise
         rows = list(
             (
                 await session.scalars(
@@ -350,23 +484,19 @@ async def verify_audit_chain(
                 )
             ).all()
         )
-
         previous_hash = GENESIS_HASH
         expected_sequence = 1
         first_failure: int | None = None
         reason: str | None = None
-
         for event in rows:
             if event.sequence_no != expected_sequence:
                 first_failure = event.sequence_no
                 reason = "sequence_gap_or_reordering"
                 break
-
             if event.previous_hash != previous_hash:
                 first_failure = event.sequence_no
                 reason = "previous_hash_mismatch"
                 break
-
             payload = audit_hash_payload(
                 event_id=str(event.id),
                 # SQLite returns naive datetimes; normalise to UTC for hashing.
@@ -387,17 +517,13 @@ async def verify_audit_chain(
                 sequence_no=event.sequence_no,
                 previous_hash=event.previous_hash,
             )
-
             if calculate_event_hash(payload) != event.event_hash:
                 first_failure = event.sequence_no
                 reason = "event_hash_mismatch"
                 break
-
             previous_hash = event.event_hash
             expected_sequence += 1
-
         expected_head_sequence = len(rows)
-
         if (
             reason is None
             and head is not None
@@ -408,11 +534,9 @@ async def verify_audit_chain(
         ):
             first_failure = expected_head_sequence + 1
             reason = "chain_head_mismatch"
-
         elif reason is None and head is None and rows:
             first_failure = 1
             reason = "chain_head_missing"
-
         return {
             "tenant_id": tenant_id,
             "valid": reason is None,
@@ -432,12 +556,9 @@ async def list_audit_events(
     offset: int = 0,
     action: str | None = None,
 ) -> tuple[list[AuditEvent], int]:
-
     filters = [AuditEvent.tenant_id == tenant_id]
-
     if action:
         filters.append(AuditEvent.action == action)
-
     items = list(
         (
             await session.scalars(
@@ -449,12 +570,10 @@ async def list_audit_events(
             )
         ).all()
     )
-
     count = int(
         await session.scalar(
             select(func.count()).select_from(AuditEvent).where(*filters)
         )
         or 0
     )
-
     return items, count

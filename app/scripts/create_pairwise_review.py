@@ -10,9 +10,7 @@ from app.evaluation.pairwise_blinding import create_blinded_pairs
 
 
 def main() -> int:
-
     parser = argparse.ArgumentParser(description=__doc__)
-
     parser.add_argument(
         "--candidate-a", required=True, help="JSONL outputs for candidate A"
     )
@@ -31,9 +29,7 @@ def main() -> int:
         action="store_true",
         help="Include only pre-approved `review_context` inputs",
     )
-
     args = parser.parse_args()
-
     public, private = create_blinded_pairs(
         load_jsonl(args.candidate_a),
         load_jsonl(args.candidate_b),
@@ -42,10 +38,10 @@ def main() -> int:
         seed=args.seed,
         include_review_context=args.include_review_context,
     )
-
     write_json(
         args.public_output, {"review_version": "blinded-pairwise-v1", "tasks": public}
     )
+<<<<<<< Updated upstream
 
     private_output = Path(args.private_map_output)
     private_output.parent.mkdir(parents=True, exist_ok=True)
@@ -68,10 +64,14 @@ def main() -> int:
             os.chmod(private_output, 0o600)
     except (AttributeError, NotImplementedError, OSError):
         pass
+=======
+    # Keep this file out of version control and accessible only to the evaluation owner.
+    write_json(args.private_map_output, {"private_mapping": private})
+    Path(args.private_map_output).chmod(0o600)
+>>>>>>> Stashed changes
     print(
         f"Created {len(public)} blinded tasks. Keep the private mapping separate from reviewers."
     )
-
     return 0
 
 

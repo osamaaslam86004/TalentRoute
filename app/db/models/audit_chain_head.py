@@ -11,7 +11,6 @@ class AuditChainHead(Base):
     """Locked per-tenant head row that serializes event sequence allocation."""
 
     __tablename__ = "audit_chain_heads"
-
     tenant_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     last_sequence: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"

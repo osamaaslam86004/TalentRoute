@@ -25,7 +25,10 @@ from app.workers.telemetry import build_task_headers
 
 logger = logging.getLogger(__name__)
 
+_outbox_claim_lock = asyncio.Lock()
 
+
+<<<<<<< Updated upstream
 def _coerce_utc_datetime(value: datetime | None) -> datetime | None:
     """Normalize SQLite/async values into timezone-aware UTC datetimes."""
     if value is None:
@@ -34,6 +37,19 @@ def _coerce_utc_datetime(value: datetime | None) -> datetime | None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
 
+=======
+def _run_async(coro_fn_or_coro):
+    """Safely run a coroutine or callable whether an event loop is already running or not."""
+    res = coro_fn_or_coro() if callable(coro_fn_or_coro) else coro_fn_or_coro
+    if not asyncio.iscoroutine(res):
+        return res
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        import concurrent.futures
+>>>>>>> Stashed changes
 
 def _get_claim_batch_lock() -> asyncio.Lock:
     """Create a loop-bound lock lazily so concurrent tasks share the same lock within a loop."""
@@ -54,6 +70,7 @@ _get_claim_batch_lock._locks = {}
 
 
 async def _claim_batch(limit: int) -> list[tuple[str, str, str, dict, int]]:
+<<<<<<< Updated upstream
 
     settings = get_settings()
 
@@ -212,9 +229,90 @@ async def _claim_batch(limit: int) -> list[tuple[str, str, str, dict, int]]:
                     )
                 ),
                 int(row["attempt_count"]),
+=======
+    async with _outbox_claim_lock:
+        settings = get_settings()
+        now = datetime.now(UTC)
+        stale_before = now - timedelta(seconds=settings.outbox_lease_seconds)
+        async with AsyncSessionLocal() as session:
+            expired_result = await session.execute(
+                update(OutboxEvent)
+                .where(
+                    OutboxEvent.status == "dispatching",
+                    OutboxEvent.attempt_count >= settings.outbox_max_attempts,
+                    or_(
+                        OutboxEvent.locked_at.is_(None),
+                        OutboxEvent.locked_at < stale_before,
+                    ),
+                )
+                .values(
+                    status="dead",
+                    locked_at=None,
+                    last_error_code="dispatch_lease_expired",
+                )
             )
-            for row in rows
-        ]
+            expired_count = max(0, int(expired_result.rowcount or 0))
+            if expired_count:
+                record_pipeline_event(
+                    "outbox.dead",
+                    outcome="dead",
+                    stage="outbox",
+                    status="dead",
+                    value=expired_count,
+                )
+            statement = (
+                select(OutboxEvent)
+                .where(
+                    OutboxEvent.available_at <= now,
+                    or_(
+                        OutboxEvent.status == "pending",
+                        and_(
+                            OutboxEvent.status == "dispatching",
+                            or_(
+                                OutboxEvent.locked_at.is_(None),
+                                OutboxEvent.locked_at < stale_before,
+                            ),
+                        ),
+                    ),
+                    OutboxEvent.attempt_count < settings.outbox_max_attempts,
+                )
+                .order_by(OutboxEvent.created_at.asc())
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+>>>>>>> Stashed changes
+            )
+            rows = list((await session.scalars(statement)).all())
+            for row in rows:
+                row.status = "dispatching"
+                row.locked_at = now
+                row.attempt_count += 1
+                row.last_error_code = None
+            await session.commit()
+            if rows:
+                record_pipeline_event(
+                    "outbox.claimed",
+                    outcome="success",
+                    stage="outbox",
+                    status="dispatching",
+                    value=len(rows),
+                )
+                try:
+                    redis_client = get_rate_limit_redis_client()
+                    await redis_client.set(
+                        "dispatcher:heartbeat", datetime.now(UTC).isoformat(), ex=120
+                    )
+                except Exception:
+                    pass
+            return [
+                (
+                    str(row.id),
+                    row.tenant_id,
+                    row.event_type,
+                    dict(row.payload),
+                    row.attempt_count,
+                )
+                for row in rows
+            ]
 
 
 async def _mark_dispatched(event_id: str) -> None:

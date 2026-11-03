@@ -21,33 +21,26 @@ async def process_screening(
     screening_id: uuid.UUID, *, allow_reclaim_running: bool = False
 ) -> None:
     """Run the graph over minimized text and persist provenance plus a privacy-safe audit event."""
-
     settings = get_settings()
-
     async with AsyncSessionLocal() as session:
         with traced_stage("claim", screening_id=str(screening_id)):
             screening = await get_screening(session, screening_id, for_update=True)
-
         if screening is None:
             logger.warning(
                 "screening task references missing record id=%s", screening_id
             )
             return
-
         if screening.status == "completed":
             record_pipeline_event(
                 "screening.duplicate", outcome="duplicate", stage="claim"
             )
             return  # Idempotent for task redelivery after a successful commit.
-
         now = datetime.now(UTC)
-
         if (
             screening.status == "running"
             and screening.processing_started_at is not None
         ):
             age_seconds = (now - screening.processing_started_at).total_seconds()
-
             if (
                 not allow_reclaim_running
                 and age_seconds < settings.stale_processing_seconds
@@ -57,7 +50,6 @@ async def process_screening(
                     "screening.duplicate", outcome="duplicate", stage="claim"
                 )
                 return
-
             if allow_reclaim_running:
                 logger.warning(
                     "reclaiming redelivered running task id=%s", screening_id
@@ -65,14 +57,12 @@ async def process_screening(
                 record_pipeline_event(
                     "screening.reclaimed", outcome="reclaimed", stage="claim"
                 )
-
             else:
                 logger.warning(
                     "reclaiming stale screening task id=%s age_seconds=%s",
                     screening_id,
                     int(age_seconds),
                 )
-
         screening.status = "running"
         screening.processing_started_at = now
         screening.error_code = None
@@ -83,10 +73,8 @@ async def process_screening(
         job_title = screening.job_title
         required_skills = screening.required_skills
         await session.commit()
-
     redaction_counts: dict[str, int] = {}
     redacted_categories: list[str] = []
-
     try:
         with traced_stage("redact", screening_id=str(screening_id)):
             redaction = redact_pii(
@@ -94,12 +82,9 @@ async def process_screening(
                 enabled=settings.pii_redaction_enabled,
                 policy=settings.pii_redaction_policy,
             )
-
         redaction_counts = redaction.counts
         redacted_categories = redaction.categories
-
         graph = create_screening_graph()
-
         with traced_stage("graph", screening_id=str(screening_id)):
             callbacks = [TelemetryCallbackHandler(model_name=settings.openai_model)]
             result = await graph.ainvoke(
@@ -113,10 +98,8 @@ async def process_screening(
                 },
                 config={"callbacks": callbacks},
             )
-
         experience: ExperienceAssessment = result["experience_assessment"]
         skills: SkillsAssessment = result["skills_assessment"]
-
     except Exception as exc:
         record_pipeline_event(
             "screening.failed",
@@ -129,17 +112,14 @@ async def process_screening(
             screening_id,
             type(exc).__name__,
         )
-
         async with AsyncSessionLocal() as session:
             row = await get_screening(session, screening_id, for_update=True)
-
             if row is not None:
                 row.status = "failed"
                 row.processing_started_at = None
                 row.error_code = "screening_processing_failed"
                 row.redaction_summary = redaction_counts
                 row.processed_at = datetime.now(UTC)
-
                 await record_audit_event(
                     session,
                     principal=None,
@@ -159,13 +139,10 @@ async def process_screening(
                 with traced_stage("persist", screening_id=str(screening_id)):
                     await session.commit()
         raise
-
     async with AsyncSessionLocal() as session:
         row = await get_screening(session, screening_id, for_update=True)
-
         if row is None:
             return
-
         row.status = "completed"
         row.processing_started_at = None
         row.experience_level = experience.level.value
@@ -183,7 +160,6 @@ async def process_screening(
         row.redaction_summary = redaction.counts
         row.error_code = None
         row.processed_at = datetime.now(UTC)
-
         await record_audit_event(
             session,
             principal=None,

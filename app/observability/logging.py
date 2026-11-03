@@ -1,13 +1,10 @@
 """Process-wide logging for the API, Celery workers and CLI scripts.
-
 * ``console`` (default) keeps the historical one-line format; correlation fields are appended only
   when something is bound, so output is unchanged until code starts binding context.
 * ``json`` emits one object per line with service metadata, correlation ids and trace ids.
-
 Neither format ever serialises arbitrary ``extra=`` fields, only the allow-list in ``policy``. In
 staging/production the JSON formatter also replaces exception text with the exception *type* and a
 frame summary, because provider and driver errors can echo request or applicant content.
-
 Standard-library ``logging`` is kept on purpose: every existing ``logging.getLogger(__name__)`` call
 site works unchanged.
 """
@@ -37,9 +34,7 @@ try:  # opentelemetry-api is a declared dependency, but logging must work withou
     from opentelemetry import trace as _otel_trace
 except ImportError:  # pragma: no cover
     _otel_trace = None
-
 CONSOLE_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
-
 _HANDLER_MARK = "_observability_handler"
 _CORRELATION_FIELDS: tuple[str, ...] = (*CONTEXT_FIELDS, "trace_id", "span_id")
 _PACKAGE_NAME = "langgraph-candidate-screening-service"
@@ -58,7 +53,6 @@ def _package_version() -> str:
 
 class ContextFilter(logging.Filter):
     """Copy the bound correlation context and the active trace ids onto each record.
-
     Attached to the *handler*, not a logger: logger-level filters are skipped for records that
     propagate up from child loggers, which is nearly every record in this codebase.
     """
@@ -68,7 +62,6 @@ class ContextFilter(logging.Filter):
         for name in CONTEXT_FIELDS:
             # Overwrite unconditionally so ``extra={"tenant_id": ...}`` cannot spoof correlation.
             setattr(record, name, bound.get(name))
-
         record.trace_id = None
         record.span_id = None
         if _otel_trace is not None:
@@ -89,18 +82,15 @@ def _bounded(value: Any) -> Any:
 
 def _scrubbed_exception(exc_info: tuple[Any, Any, Any]) -> dict[str, Any]:
     """Type, optional provider code and a frame summary. Never the message or locals."""
-
     exc_type, exc, tb = exc_info
     target = exc if exc is not None else exc_type
     info: dict[str, Any] = {"exc_type": exception_type_name(target)}
-
     if exc is not None:
         code = stable_error_code(exc)
         if code:
             info["exc_code"] = code
         if exc.__cause__ is not None:
             info["exc_cause_type"] = exception_type_name(exc.__cause__)
-
     frames = [
         f"{os.path.basename(frame.f_code.co_filename)}:{lineno}:{frame.f_code.co_name}"
         for frame, lineno in traceback.walk_tb(tb)
@@ -140,19 +130,16 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
             **self._static,
         }
-
         for name in _CORRELATION_FIELDS:
             value = getattr(record, name, None)
             if value:
                 payload[name] = value
-
         for name in sorted(ALLOWED_LOG_EXTRA_FIELDS):
             value = record.__dict__.get(name)
             if value is not None:
                 bounded = _bounded(value)
                 if bounded is not None:
                     payload[name] = bounded
-
         if record.exc_info and record.exc_info[0] is not None:
             if self._scrub_exceptions:
                 payload.update(_scrubbed_exception(record.exc_info))
@@ -160,7 +147,6 @@ class JsonFormatter(logging.Formatter):
                 payload["exception"] = self.formatException(record.exc_info)
         if record.stack_info and not self._scrub_exceptions:
             payload["stack"] = self.formatStack(record.stack_info)
-
         return json.dumps(
             payload, ensure_ascii=False, separators=(",", ":"), default=str
         )
@@ -180,7 +166,6 @@ class ConsoleFormatter(logging.Formatter):
         )
         if not suffix:
             return super().format(record)
-
         # Insert on the message line, ahead of any traceback that super().format() appends.
         original_msg, original_args = record.msg, record.args
         record.msg, record.args = f"{record.getMessage()} [{suffix}]", None
@@ -209,11 +194,9 @@ def _build_formatter(settings: Settings, role: str) -> logging.Formatter:
 
 def _route_uvicorn_through_root() -> None:
     """Uvicorn installs its own handlers and sets ``propagate=False`` before the app is imported.
-
     Removing them sends its lifecycle and access lines through the same formatter as ours, so a
     log pipeline sees one format. Levels are left untouched, so ``--log-level`` keeps working.
     """
-
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
         framework_logger = logging.getLogger(name)
         framework_logger.handlers.clear()
@@ -227,27 +210,21 @@ def configure_logging(
     stream: IO[str] | None = None,
 ) -> logging.Handler:
     """Install the root handler. Idempotent; foreign handlers (pytest, Celery) are left alone."""
-
     settings = settings or get_settings()
     root = logging.getLogger()
-
     for existing in list(root.handlers):
         if getattr(existing, _HANDLER_MARK, False):
             root.removeHandler(existing)
             existing.close()
-
     handler = logging.StreamHandler(stream if stream is not None else sys.stderr)
     handler.addFilter(ContextFilter())
     handler.setFormatter(_build_formatter(settings, role))
     setattr(handler, _HANDLER_MARK, True)
-
     root.addHandler(handler)
     root.setLevel(_resolve_level(settings.log_level))
-
     # Only in JSON mode: console mode must keep uvicorn's own familiar output exactly as before.
     if role == "api" and settings.log_format == "json":
         _route_uvicorn_through_root()
-
     if (
         settings.log_format == "console"
         and settings.environment in _SCRUBBED_ENVIRONMENTS

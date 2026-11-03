@@ -31,7 +31,6 @@ _audit_chain_valid_gauge: Any | None = None
 _db_pool_in_use_gauge: Any | None = None
 _db_pool_available_gauge: Any | None = None
 _audit_head_lock_duration: Any | None = None
-
 _ALLOWED_AUTH_REASONS = frozenset(
     {"missing", "invalid", "forbidden", "jwks_unavailable"}
 )
@@ -89,7 +88,6 @@ def initialize_metrics(settings: Settings) -> None:
         _dispatcher_heartbeat_gauge, \
         _audit_chain_valid_gauge
     global _db_pool_available_gauge, _db_pool_in_use_gauge, _audit_head_lock_duration
-
     if not settings.otel_enabled:
         return
     with _lock:
@@ -330,7 +328,6 @@ def record_pipeline_gauges(stats: dict[str, int | float], audit_valid: int = 1) 
         _dispatcher_heartbeat_gauge, \
         _audit_chain_valid_gauge
     global _db_pool_in_use_gauge, _db_pool_available_gauge
-
     try:
         if _outbox_dead_gauge is not None:
             _outbox_dead_gauge.set(float(stats.get("outbox_dead", 0)))
@@ -377,7 +374,6 @@ def shutdown_metrics() -> None:
         _redis_queue_gauge, \
         _dispatcher_heartbeat_gauge, \
         _audit_chain_valid_gauge
-
     with _lock:
         provider = _provider
         _provider = None

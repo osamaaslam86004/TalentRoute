@@ -1,5 +1,4 @@
 """Privacy-aware instrumentation wiring for the API process.
-
 The export boundary in ``tracing.py`` scrubs auto-instrumented attributes/events. No request
 or response body capture is enabled; SQL statements and raw URLs are removed before export.
 """
@@ -19,7 +18,6 @@ def instrument_api(app: Any, engine: Any, settings: Settings) -> None:
     """Instrument FastAPI, SQLAlchemy, Redis and HTTPX once when OTel is enabled."""
     if not settings.otel_enabled or id(app) in _INSTRUMENTED_APPS:
         return
-
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
     from opentelemetry.instrumentation.redis import RedisInstrumentor

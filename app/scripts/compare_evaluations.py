@@ -10,7 +10,6 @@ from app.evaluation.evaluation_pipeline import compare_reports, write_json
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-
     parser.add_argument("--baseline", required=True)
     parser.add_argument("--candidate", required=True)
     parser.add_argument("--output", default="reports/release-gate.json")
@@ -20,12 +19,9 @@ def main() -> int:
     parser.add_argument("--max-distribution-shift", type=float, default=0.25)
     parser.add_argument("--max-latency-increase", type=float, default=0.25)
     parser.add_argument("--max-cost-increase", type=float, default=0.25)
-
     args = parser.parse_args()
-
     baseline = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
     candidate = json.loads(Path(args.candidate).read_text(encoding="utf-8"))
-
     report = compare_reports(
         baseline,
         candidate,
@@ -36,10 +32,8 @@ def main() -> int:
         max_latency_increase=args.max_latency_increase,
         max_cost_increase=args.max_cost_increase,
     )
-
     write_json(args.output, report)
     print(json.dumps(report, indent=2))
-
     return 0 if report["passed"] else 2
 
 

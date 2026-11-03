@@ -22,7 +22,6 @@ class AuditEvent(Base):
         Index("ix_audit_events_tenant_occurred_at", "tenant_id", "occurred_at"),
         Index("ix_audit_events_resource", "resource_type", "resource_id"),
     )
-
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )

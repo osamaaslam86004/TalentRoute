@@ -15,7 +15,6 @@ from app.core.security import Principal
 from app.observability.metrics import record_rate_limit_decision
 
 logger = logging.getLogger(__name__)
-
 # Lua makes increment + initial TTL assignment atomic across API replicas.
 _INCREMENT_SCRIPT = """
 local count = redis.call('INCR', KEYS[1])
@@ -39,33 +38,35 @@ def get_rate_limit_redis_client() -> Redis:
 
 async def enforce_screening_rate_limit(request: Request, principal: Principal) -> None:
     """Raise 429 when a tenant/actor exceeds its configured submission window.
-
     The identity material is hashed before becoming a Redis key. On Redis failure,
     behavior is configurable; the default is fail-closed with a 503 response.
     """
     settings = get_settings()
-
     identity = f"{principal.tenant_id}:{principal.subject}:{request.url.path}"
-
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
     key = f"rate-limit:screening-create:{digest}"
-
     try:
         result = await _redis_client(settings.redis_url).eval(
             _INCREMENT_SCRIPT, 1, key, settings.screening_rate_limit_window_seconds
         )
         count, ttl = int(result[0]), max(1, int(result[1]))
-
     except (RedisError, OSError, TimeoutError) as exc:
         logger.warning(
             "rate limiter backend unavailable error_type=%s", type(exc).__name__
         )
+<<<<<<< Updated upstream
 
         backend_fail_open = (
             settings.rate_limit_fail_open
             or settings.environment in {"development", "test"}
         )
         if backend_fail_open:
+=======
+        if settings.rate_limit_fail_open or (
+            ("Timeout" in type(exc).__name__ or isinstance(exc, TimeoutError))
+            and settings.environment in {"test", "development"}
+        ):
+>>>>>>> Stashed changes
             record_rate_limit_decision("backend_error_open")
             return
         record_rate_limit_decision("backend_error_closed")
@@ -74,7 +75,6 @@ async def enforce_screening_rate_limit(request: Request, principal: Principal) -
             detail="Submission rate limiter is temporarily unavailable",
             headers={"Retry-After": "5"},
         ) from exc
-
     if count > settings.screening_rate_limit_requests:
         record_rate_limit_decision("limited")
         raise HTTPException(
@@ -87,11 +87,7 @@ async def enforce_screening_rate_limit(request: Request, principal: Principal) -
 
 async def close_rate_limit_client() -> None:
     """Close the shared Redis connection pool during application shutdown."""
-
     settings = get_settings()
-
     client = _redis_client(settings.redis_url)
-
     await client.aclose()
-
     _redis_client.cache_clear()

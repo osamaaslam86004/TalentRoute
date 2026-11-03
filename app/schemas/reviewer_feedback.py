@@ -28,13 +28,11 @@ ALLOWED_REASON_CODES = {
     "rubric_ambiguity",
     "other",
 }
-
 NonEmpty = Annotated[str, Field(min_length=1, max_length=80)]
 
 
 class ReviewerFeedbackCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-
     label: ReviewLabel
     reason_codes: list[NonEmpty] = Field(min_length=1, max_length=8)
     notes: str | None = Field(default=None, max_length=2000)
@@ -42,31 +40,25 @@ class ReviewerFeedbackCreate(BaseModel):
     @field_validator("reason_codes")
     @classmethod
     def validate_reason_codes(cls, values: list[str]) -> list[str]:
-
         unique = list(dict.fromkeys(value.strip() for value in values if value.strip()))
         unknown = set(unique).difference(ALLOWED_REASON_CODES)
-
         if unknown:
             raise ValueError(
                 f"Unsupported reason code(s): {', '.join(sorted(unknown))}"
             )
-
         if not unique:
             raise ValueError("At least one reason code is required")
-
         return unique
 
 
 class AppealCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-
     outcome: AppealOutcome
     notes: str | None = Field(default=None, max_length=2000)
 
 
 class ReviewerFeedbackRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: uuid.UUID
     screening_id: uuid.UUID | None
     tenant_id: str

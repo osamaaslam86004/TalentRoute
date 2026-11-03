@@ -1,8 +1,6 @@
 """Privacy and cardinality policy for everything this service emits as telemetry.
-
 This service processes job applications, so the default stance is *allow-list, never deny-list*:
 nothing reaches a metric label, span attribute or structured-log field unless it is named here.
-
 Telemetry must never break the request path. The ``sanitize_*`` / ``filter_*`` helpers therefore
 drop what they do not recognise and only raise when called with ``strict=True`` (used by tests, so
 a new label has to be added here deliberately and shows up in code review).
@@ -50,7 +48,6 @@ ALLOWED_METRIC_LABELS: frozenset[str] = frozenset(
         "queue",
     }
 )
-
 # Never valid as metric labels, even if someone adds them to the allow-list by mistake
 # (see test_policy). They belong on logs/spans, where cardinality is not a cost problem.
 FORBIDDEN_METRIC_LABELS: frozenset[str] = frozenset(
@@ -69,11 +66,9 @@ FORBIDDEN_METRIC_LABELS: frozenset[str] = frozenset(
         "application_text",
     }
 )
-
 _MAX_LABEL_VALUE = 64
 _MAX_ATTRIBUTE_VALUE = 256
 _MAX_SEQUENCE_ITEMS = 20
-
 # --------------------------------------------------------------------------------------------
 # Structured-log extras: ``logger.info("...", extra={...})`` fields that may be emitted.
 # Anything else passed via ``extra`` is dropped by the JSON formatter.
@@ -93,7 +88,6 @@ ALLOWED_LOG_EXTRA_FIELDS: frozenset[str] = frozenset(
         "attempt",
     }
 )
-
 # --------------------------------------------------------------------------------------------
 # Span attributes. Exact keys plus namespaced prefixes, with an explicit deny list that wins.
 # Raw URLs, headers, SQL text and exception messages are the usual ways content leaks into traces.
@@ -162,10 +156,8 @@ def sanitize_metric_labels(
     labels: Mapping[str, Any], *, strict: bool = False
 ) -> dict[str, str]:
     """Keep only allow-listed labels and bound their values.
-
     With ``strict=True`` an unknown or forbidden label raises ``ValueError``; otherwise it is dropped.
     """
-
     result: dict[str, str] = {}
     for key, value in labels.items():
         if key in FORBIDDEN_METRIC_LABELS or key not in ALLOWED_METRIC_LABELS:
@@ -202,7 +194,6 @@ def filter_span_attributes(
     attributes: Mapping[str, Any], *, strict: bool = False
 ) -> dict[str, Any]:
     """Keep allow-listed span attributes with OTel-valid, bounded values."""
-
     result: dict[str, Any] = {}
     for key, value in attributes.items():
         if not is_allowed_span_attribute(key):
@@ -226,11 +217,9 @@ def filter_span_attributes(
 # --------------------------------------------------------------------------------------------
 def actor_hash(subject: str | None, settings: Settings | None = None) -> str | None:
     """Keyed, truncated hash of an actor identifier for correlation on logs and spans.
-
     Returns ``None`` when no salt is configured: an unsalted hash of an email-like subject is
     trivially reversible by dictionary, so the safe default is to emit no actor identity at all.
     """
-
     secret = (settings or get_settings()).telemetry_hash_salt
     salt = secret.get_secret_value() if secret else ""
     if not subject or not salt:
@@ -245,7 +234,6 @@ _ERROR_CODE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 
 def exception_type_name(exc: BaseException | type[BaseException]) -> str:
     """Class name, module-qualified outside builtins. Never includes the exception message."""
-
     cls = exc if isinstance(exc, type) else type(exc)
     name = (
         cls.__qualname__
@@ -257,11 +245,9 @@ def exception_type_name(exc: BaseException | type[BaseException]) -> str:
 
 def stable_error_code(exc: BaseException) -> str | None:
     """A provider's machine-readable code (e.g. ``rate_limit_exceeded``), if it is code-shaped.
-
     Only short lowercase tokens are accepted; free text, numbers and mixed-case strings are ignored
     so an exception cannot smuggle message content through this field.
     """
-
     for attribute in ("error_code", "code"):
         value = getattr(exc, attribute, None)
         if isinstance(value, str) and _ERROR_CODE.fullmatch(value):
@@ -287,7 +273,6 @@ _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 def active_langsmith_flags(env: Mapping[str, str] | None = None) -> list[str]:
     """Names (never values) of environment variables that enable LangSmith/LangChain tracing."""
-
     env = os.environ if env is None else env
     active: list[str] = []
     for prefix in _LANGSMITH_PREFIXES:
@@ -305,15 +290,12 @@ def enforce_langsmith_policy(
     settings: Settings | None = None, env: Mapping[str, str] | None = None
 ) -> list[str]:
     """Refuse to start in staging/production with third-party tracing on, unless explicitly allowed.
-
     Elsewhere it logs a warning. Returns the active variable names.
     """
-
     settings = settings or get_settings()
     flags = active_langsmith_flags(env)
     if not flags:
         return []
-
     names = ", ".join(flags)
     guarded = settings.environment in {"staging", "production"}
     if guarded and not settings.allow_langsmith_tracing:
@@ -322,7 +304,6 @@ def enforce_langsmith_policy(
             "applicant data to a third party. Unset it, or set ALLOW_LANGSMITH_TRACING=true after "
             "a data-processing review."
         )
-
     logger.warning(
         "LangChain/LangSmith tracing is enabled (%s); prompts and applicant text leave this "
         "system. allowed=%s",

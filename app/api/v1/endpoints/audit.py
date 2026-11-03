@@ -15,9 +15,7 @@ async def get_audit_integrity(
     principal: Principal = Depends(require_permission("audit:read")),
     session: AsyncSession = Depends(get_db_session),
 ) -> AuditIntegrityRead:
-
     result = await verify_audit_chain(session, tenant_id=principal.tenant_id)
-
     await record_audit_event(
         session,
         principal=principal,
@@ -44,7 +42,6 @@ async def get_audit_events(
     principal: Principal = Depends(require_permission("audit:read")),
     session: AsyncSession = Depends(get_db_session),
 ) -> AuditEventList:
-
     items, count = await list_audit_events(
         session,
         tenant_id=principal.tenant_id,
@@ -52,7 +49,6 @@ async def get_audit_events(
         offset=offset,
         action=action,
     )
-
     await record_audit_event(
         session,
         principal=principal,
@@ -62,9 +58,7 @@ async def get_audit_events(
         resource_type="audit_event_collection",
         metadata={"limit": limit, "offset": offset, "count": count},
     )
-
     await session.commit()
-
     return AuditEventList(
         items=[AuditEventRead.model_validate(item) for item in items],
         limit=limit,

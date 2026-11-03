@@ -60,7 +60,6 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None if settings.environment == "production" else "/openapi.json",
 )
-
 if settings.cors_origins:
     app.add_middleware(
         CORSMiddleware,
@@ -76,7 +75,6 @@ if settings.cors_origins:
         ],
         expose_headers=["X-Request-ID"],
     )
-
 app.add_middleware(RequestTelemetryMiddleware)
 
 
@@ -90,7 +88,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         getattr(request.state, "request_id", "unknown"),
         type(exc).__name__,
     )
-
     request_id = getattr(request.state, "request_id", None)
     try:
         route = request.scope.get("route")
@@ -103,7 +100,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         )
     except Exception:
         pass
-
     return JSONResponse(
         status_code=500,
         headers={

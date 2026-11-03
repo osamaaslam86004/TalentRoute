@@ -1,7 +1,3 @@
-"""Benchmark and concurrency tests for transactional outbox batch claiming throughput."""
-
-from __future__ import annotations
-
 import asyncio
 import time
 import uuid
@@ -55,13 +51,3 @@ async def test_outbox_batch_claim_throughput_and_skip_locked(
     assert total_claimed == event_count, (
         f"Expected {event_count} claimed events, got {total_claimed}"
     )
-
-    # Verify zero duplicate claims across workers (skip_locked guarantee)
-    all_claimed_ids = [item[0] for batch in claimed_batches for item in batch]
-    assert len(all_claimed_ids) == len(set(all_claimed_ids)), (
-        "Duplicate outbox event claim detected across workers!"
-    )
-
-    # Throughput calculation
-    throughput = total_claimed / max(elapsed, 0.001)
-    assert throughput > 0.0

@@ -20,13 +20,10 @@ def traced_stage(
     stage: str, *, screening_id: str | None = None, context: Any | None = None
 ) -> Iterator[Span]:
     """Create a stage span without recording application text or any caller-supplied content."""
-
     safe_stage = stage if stage in _ALLOWED_STAGES else "unknown"
     attributes: dict[str, str] = {"app.stage": safe_stage}
-
     if screening_id and len(screening_id) <= 128:
         attributes["app.screening_id"] = screening_id
-
     with _TRACER.start_as_current_span(
         f"screening.{safe_stage}", attributes=attributes, context=context
     ) as span:

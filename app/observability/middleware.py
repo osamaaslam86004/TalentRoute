@@ -1,5 +1,4 @@
 """Pure-ASGI request correlation and RED (rate, errors, duration) telemetry.
-
 Only route templates and bounded, low-cardinality values reach metrics. Raw URLs,
 query strings, request bodies, and authorization headers are never recorded here.
 """
@@ -20,7 +19,6 @@ ASGIMessage = dict[str, Any]
 ASGIReceive = Callable[[], Awaitable[ASGIMessage]]
 ASGISend = Callable[[ASGIMessage], Awaitable[None]]
 ASGIApp = Callable[[dict[str, Any], ASGIReceive, ASGISend], Awaitable[None]]
-
 logger = logging.getLogger("app.observability.access")
 _SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
     (b"x-content-type-options", b"nosniff"),
@@ -73,7 +71,6 @@ class RequestTelemetryMiddleware:
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return
-
         headers = list(scope.get("headers", []))
         request_id = _request_id(headers)
         state = scope.setdefault("state", {})

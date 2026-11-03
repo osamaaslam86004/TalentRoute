@@ -1,5 +1,4 @@
 """Configurable PII minimization before a resume/application is sent to an LLM.
-
 This is a conservative regex-based baseline, not anonymization. It masks common structured fields
 and labelled names/addresses/identifiers. It can miss multilingual, misspelled, or unlabelled data and
 can redact legitimate evidence. For regulated deployments, replace/augment the strategy with a vetted
@@ -84,22 +83,16 @@ def redact_pii(
     text: str, *, enabled: bool = True, policy: str = "baseline"
 ) -> RedactionResult:
     """Mask structured PII and expose aggregate counts only, never the matched values."""
-
     if not enabled:
         return RedactionResult(text=text, counts={}, changed=False)
-
     if policy not in {"baseline", "strict"}:
         raise ValueError("policy must be 'baseline' or 'strict'")
-
     output = text
     counts: dict[str, int] = {}
-
     for category, pattern, replacement, strict_only in _RULES:
         if strict_only and policy != "strict":
             continue
-
         output, count = pattern.subn(replacement, output)
         if count:
             counts[category] = count
-
     return RedactionResult(text=output, counts=counts, changed=output != text)
